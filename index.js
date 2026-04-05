@@ -562,42 +562,13 @@ const sendTesti = async (data) => {
         console.error("Gagal kirim testi ke channel:", e.message);
     }
 };
-// --- HANDLER INPUT TEKS (UNTUK NOMINAL MANUAL) ---
-bot.on('text', async (ctx) => {
-    // Abaikan jika pesan diawali '/' (karena itu command seperti /start atau /menu)
-    if (ctx.message.text.startsWith('/')) return;
-
-    const input = parseInt(ctx.message.text.replace(/[^0-9]/g, '')); // Bersihkan dari titik atau huruf
-
-    // Validasi apakah input adalah angka
-    if (!isNaN(input)) {
-        // Cek Minimum Rp 2.000
-        if (input < 2000) {
-            return ctx.reply('⚠️ *Minimal Top Up adalah Rp 2.000*, Bre! Silakan masukkan nominal yang lebih besar.');
-        }
-
-        // Konfirmasi Nominal
-        const msg = `💳 *KONFIRMASI TOP UP*\n━━━━━━━━━━━━━━━━━━\n` +
-                    `💰 Nominal: *Rp ${input.toLocaleString('id-ID')}*\n` +
-                    `📝 Metode: *QRIS (Otomatis)*\n━━━━━━━━━━━━━━━━━━\n` +
-                    `Apakah data di atas sudah benar?`;
-
-        return ctx.reply(msg, {
-            parse_mode: 'Markdown',
-            ...Markup.inlineKeyboard([
-                [Markup.button.callback('✅ Lanjut Bayar', `depo_${input}`)],
-                [Markup.button.callback('❌ Batal', 'topup_menu')]
-            ])
-        });
-    }
-});
 
 // TOP UP SALDO
 // --- 1. MENU TOP UP ---
 bot.action('topup_menu', async (ctx) => {
     const msg = `💳 *TOP UP SALDO - MANZZY ID*\n\n` +
                 `Metode: *QRIS Otomatis*\n` +
-                `Minimal: *Rp 10.000*\n\n` +
+                `Minimal: *Rp 2.000*\n\n` +
                 `Silakan pilih nominal atau ketik jumlah saldo:`;
     
     await ctx.editMessageCaption(msg, {
@@ -700,6 +671,42 @@ bot.action(/^canceldepo_(.+)$/, async (ctx) => {
     } catch (e) {
         ctx.answerCbQuery('Gagal batal depo.');
     }
+});
+
+// --- HANDLER INPUT TEKS (UNTUK NOMINAL MANUAL) ---
+bot.on('text', async (ctx) => {
+    // 1. Abaikan jika pesan diawali '/' (command)
+    if (ctx.message.text.startsWith('/')) return;
+
+    // 2. Ambil angka saja
+    const rawText = ctx.message.text.replace(/[^0-9]/g, '');
+    const input = parseInt(rawText);
+
+    console.log(`[DEBUG] User ${ctx.from.id} menginput teks: ${ctx.message.text} | Hasil parse: ${input}`);
+
+    // 3. Validasi apakah benar angka
+    if (!isNaN(input) && rawText !== "") {
+        // Cek Minimum Rp 2.000
+        if (input < 2000) {
+            return ctx.reply('⚠️ *Minimal Top Up adalah Rp 2.000*, Bre!\nSilakan masukkan nominal yang lebih besar.', { parse_mode: 'Markdown' });
+        }
+
+        // 4. Konfirmasi Nominal
+        const msg = `💳 *KONFIRMASI TOP UP*\n━━━━━━━━━━━━━━━━━━\n` +
+                    `💰 Nominal: *Rp ${input.toLocaleString('id-ID')}*\n` +
+                    `📝 Metode: *QRIS (Otomatis)*\n━━━━━━━━━━━━━━━━━━\n` +
+                    `Apakah data di atas sudah benar?`;
+
+        return ctx.reply(msg, {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+                [Markup.button.callback('✅ Lanjut Bayar', `depo_${input}`)],
+                [Markup.button.callback('❌ Batal', 'topup_menu')]
+            ])
+        });
+    }
+    
+    // Jika user ngetik teks biasa (bukan angka), bot diam saja atau kasih bantuan
 });
 // --- 4. RUN BOT ---
 bot.launch().then(() => {
