@@ -7,6 +7,7 @@ const bot = new Telegraf(process.env.BOT_TOKEN);
 const OWNER_ID = 7533630775;
 const RO_API_KEY = process.env.RO_API_KEY;
 const RO_BASE_URL = 'https://www.rumahotp.io/api';
+const PROFIT_PERCENT = 15; // Artinya kamu ambil untung 15% dari harga modal
 
 // --- DATABASE SCHEMA ---
 mongoose.connect(process.env.MONGO_URI);
@@ -18,6 +19,15 @@ const User = mongoose.model('User', new mongoose.Schema({
     role: { type: String, default: 'Member' },
     isBanned: { type: Boolean, default: false }
 }));
+
+
+// profit const
+const calculatePrice = (apiPrice) => {
+    const markup = (apiPrice * PROFIT_PERCENT) / 100;
+    const finalPrice = Math.ceil((apiPrice + markup) / 100) * 100; // Pembulatan ke atas kelipatan 100
+    return finalPrice;
+};
+
 
 const roApi = axios.create({
     baseURL: RO_BASE_URL,
@@ -303,15 +313,21 @@ bot.action(/^spg_(.+)_(.+)$/, async (ctx) => {
         }
 
         // Buat Grid Server (S1, S2, dst) 3 Kolom
-        const serverButtons = [];
-        const list = country.pricelist;
+      const serverButtons = [];
+const list = country.pricelist;
 
-        for (let i = 0; i < list.length; i += 3) {
-            const row = list.slice(i, i + 3).map((p, idx) => {
-                return Markup.button.callback(`🖥️ S${i + idx + 1}`, `opr_${numId}_${p.provider_id}_${p.price}_${country.iso_code}`);
-            });
-            serverButtons.push(row);
-        }
+for (let i = 0; i < list.length; i += 3) {
+    const row = list.slice(i, i + 3).map((p, idx) => {
+        // HITUNG HARGA JUAL
+        const jualPrice = calculatePrice(p.price); 
+        
+        return Markup.button.callback(
+            `🖥️ S${i + idx + 1} - Rp${jualPrice.toLocaleString('id-ID')}`, 
+            `opr_${numId}_${p.provider_id}_${jualPrice}_${country.iso_code}`
+        );
+    });
+    serverButtons.push(row);
+}
 
         serverButtons.push([Markup.button.callback('⬅️ Kembali', `svc_${svcId}`)]);
 
@@ -378,7 +394,7 @@ bot.action(/^cf_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
 
 // --- 6. STEP: EKSEKUSI ORDER ---
 bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
-    const [_, numId, provId, opId, price] = ctx.match;
+    const [_, numId, provId, opId, priceJual] = ctx.match;
     const userId = ctx.from.id;
 
     try {
@@ -395,8 +411,8 @@ bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
 if (orderRes.data && orderRes.data.success === true) {
             const order = orderRes.data.data;
             
-            user.saldo -= parseInt(price);
-            await user.save();
+            user.saldo -= parseInt(priceJual);
+    await user.save();
 
             const successMsg = `✅ *NOMOR BERHASIL DIDAPATKAN!*\n━━━━━━━━━━━━━━━━━━\n` +
                                `📱 Layanan: *${order.service}*\n` +
@@ -528,6 +544,116 @@ const sendTesti = async (data) => {
     }
 };
 
+
+// TOP UP SALDO
+// --- 1. MENU TOP UP ---
+bot.action('topup_menu', async (ctx) => {
+    const msg = `💳 *TOP UP SALDO - MANZZY ID*\n\n` +
+                `Metode: *QRIS Otomatis*\n` +
+                `Minimal: *Rp 10.000*\n\n` +
+                `Silakan pilih nominal atau ketik jumlah saldo:`;
+    
+    await ctx.editMessageCaption(msg, {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+            [Markup.button.callback('Rp 10.000', 'depo_10000'), Markup.button.callback('Rp 20.000', 'depo_20000')],
+            [Markup.button.callback('Rp 50.000', 'depo_50000'), Markup.button.callback('Rp 100.000', 'depo_100000')],
+            [Markup.button.callback('🏠 Menu Utama', 'start_menu')]
+        ])
+    });
+});
+
+// --- 2. GENERATE QRIS ---
+bot.action(/^depo_(.+)$/, async (ctx) => {
+    const nominal = ctx.match[1];
+    try {
+        await ctx.answerCbQuery('Generate QRIS...');
+        
+        // Panggil API Deposit RumahOTP
+        const res = await roApi.get(`/v1/deposit/create?amount=${nominal}&payment_id=qris`);
+        
+        if (res.data.success) {
+            const d = res.data.data;
+            const depoMsg = `✅ *TAGIHAN PEMBAYARAN*\n━━━━━━━━━━━━━━━━━━\n` +
+                            `🆔 ID: \`${d.id}\`\n` +
+                            `💰 Total Bayar: *Rp ${d.amount.toLocaleString('id-ID')}*\n` +
+                            `📥 Saldo Diterima: *Rp ${d.currency.diterima.toLocaleString('id-ID')}*\n` +
+                            `🕒 Expired: 15 Menit\n━━━━━━━━━━━━━━━━━━\n` +
+                            `📢 *CARA BAYAR:*\n` +
+                            `1. Download/Screenshot QRIS di atas.\n` +
+                            `2. Scan pakai Dana, OVO, GoPay, ShopeePay, atau M-Banking.\n` +
+                            `3. Setelah bayar, klik tombol **CEK STATUS** di bawah.`;
+
+            // Kirim QRIS sebagai foto
+            await ctx.replyWithPhoto(d.qr_image, {
+                caption: depoMsg,
+                parse_mode: 'Markdown',
+                ...Markup.inlineKeyboard([
+                    [Markup.button.callback('🔄 CEK STATUS', `checkdepo_${d.id}_${d.currency.diterima}`)],
+                    [Markup.button.callback('❌ BATALKAN', `canceldepo_${d.id}`)]
+                ])
+            });
+        } else {
+            ctx.reply(`❌ Gagal generate QRIS: ${res.data.message}`);
+        }
+    } catch (e) {
+        ctx.reply('❌ Terjadi kesalahan sistem deposit.');
+    }
+});
+
+// --- 3. CEK STATUS DEPOSIT (PENENTU SALDO MASUK) ---
+bot.action(/^checkdepo_(.+)_(.+)$/, async (ctx) => {
+    const [_, depoId, saldoMasuk] = ctx.match;
+    const userId = ctx.from.id;
+
+    try {
+        await ctx.answerCbQuery('Mengecek pembayaran...');
+        const res = await roApi.get(`/v1/deposit/get_status?deposit_id=${depoId}`);
+        
+        if (res.data.success) {
+            const status = res.data.data.status;
+
+            if (status === 'success') {
+                // UPDATE SALDO DI DATABASE MONGODB
+                const user = await User.findOne({ telegramId: userId });
+                user.saldo += parseInt(saldoMasuk);
+                await user.save();
+
+                await ctx.editMessageCaption(`✅ *PEMBAYARAN BERHASIL!*\n\nSaldo sebesar *Rp ${parseInt(saldoMasuk).toLocaleString('id-ID')}* telah ditambahkan ke akun Anda.\nTerima kasih telah top up!`, {
+                    parse_mode: 'Markdown',
+                    ...Markup.inlineKeyboard([[Markup.button.callback('🏠 Menu Utama', 'start_menu')]])
+                });
+                
+                // Notif ke Owner (Kamu)
+                bot.telegram.sendMessage(OWNER_ID, `💰 *NOTIF DEPOSIT MASUK*\nUser: ${ctx.from.first_name} (${userId})\nJumlah: Rp ${saldoMasuk}\nID: ${depoId}`);
+                
+            } else if (status === 'pending') {
+                await ctx.answerCbQuery('⚠️ Pembayaran belum terdeteksi. Silakan bayar dulu!', { show_alert: true });
+            } else {
+                await ctx.editMessageCaption(`❌ *DEPOSIT GAGAL/EXPIRED*`, {
+                    parse_mode: 'Markdown',
+                    ...Markup.inlineKeyboard([[Markup.button.callback('🏠 Menu Utama', 'start_menu')]])
+                });
+            }
+        }
+    } catch (e) {
+        ctx.answerCbQuery('Gagal cek status depo.');
+    }
+});
+
+// --- 4. CANCEL DEPOSIT ---
+bot.action(/^canceldepo_(.+)$/, async (ctx) => {
+    const depoId = ctx.match[1];
+    try {
+        await roApi.get(`/v1/deposit/cancel?deposit_id=${depoId}`);
+        await ctx.editMessageCaption('❌ Tagihan pembayaran telah dibatalkan.', {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([[Markup.button.callback('🏠 Menu Utama', 'start_menu')]])
+        });
+    } catch (e) {
+        ctx.answerCbQuery('Gagal batal depo.');
+    }
+});
 // --- 4. RUN BOT ---
 bot.launch().then(() => {
   console.log('🚀 Bot Manzzy ID sudah online!');
