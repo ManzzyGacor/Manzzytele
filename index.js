@@ -180,7 +180,7 @@ bot.action(/^(list_services|svcpage_(.+))$/, async (ctx) => {
     } catch (e) { ctx.reply('❌ Gagal ambil layanan.'); }
 });
 
-// --- 2. STEP: PILIH NEGARA ---
+// --- STEP 2: PILIH NEGARA ---
 bot.action(/^(svc_(.+)|ctypage_(.+)_(.+))$/, async (ctx) => {
     const serviceId = ctx.match[2] || ctx.match[3];
     const page = ctx.match[4] ? parseInt(ctx.match[4]) : 0;
@@ -189,64 +189,56 @@ bot.action(/^(svc_(.+)|ctypage_(.+)_(.+))$/, async (ctx) => {
         await ctx.answerCbQuery('Memuat Negara...');
         const res = await roApi.get(`/v2/countries?service_id=${serviceId}`);
         
-        if (!res.data.success || !res.data.data) {
-            return ctx.reply('❌ API RumahOTP tidak merespon data negara.');
-        }
+        if (!res.data.success) return ctx.reply('❌ Gagal ambil data dari pusat.');
 
-        // Mapping hanya Nama dan ID untuk tombol
         const countries = res.data.data.map(c => ({
             text: `🌍 ${c.name}`,
-            id: `srv_${serviceId}_${c.number_id}` // ID disingkat agar aman di Telegram
+            // Callback: srv_[serviceId]_[numberId]
+            id: `srv_${serviceId}_${c.number_id}` 
         }));
 
         await ctx.editMessageCaption(`🌍 *Pilih Negara (Hal ${page + 1}):*`, {
             parse_mode: 'Markdown',
             ...createPagination(countries, `cty_${serviceId}`, page)
         });
-    } catch (e) { 
-        console.error("ERROR LIST NEGARA:", e.message);
-        ctx.reply('❌ Koneksi ke pusat lambat, coba lagi.'); 
-    }
+    } catch (e) { ctx.reply('❌ Gagal memuat negara.'); }
 });
 
-// --- 3. STEP: PILIH HARGA / SERVER (FIXED!) ---
+// --- STEP 3: PILIH HARGA/SERVER (PENYEBAB STUCK) ---
 bot.action(/^srv_(.+)_(.+)$/, async (ctx) => {
     const [_, svcId, numId] = ctx.match;
     
     try {
-        // Tampilkan loading di bar atas Telegram
-        await ctx.answerCbQuery('Memanggil Daftar Harga...');
+        await ctx.answerCbQuery('Memuat Harga...');
         
-        // Ambil ulang data layanan tersebut
+        // Panggil ulang API dengan service_id yang benar
         const res = await roApi.get(`/v2/countries?service_id=${svcId}`);
         
-        // CARI NEGARA BERDASARKAN number_id
-        // Gunakan == (double equals) karena numId dari callback itu String, di JSON bisa Number
+        // Cari negara berdasarkan number_id (Gunakan == agar string/number tidak masalah)
         const country = res.data.data.find(c => c.number_id == numId);
         
-        if (!country || !country.pricelist || country.pricelist.length === 0) {
-            console.log("DATA NEGARA TIDAK DITEMUKAN UNTUK ID:", numId);
-            return ctx.reply('❌ Maaf, harga/server untuk negara ini tidak ditemukan.');
+        if (!country || !country.pricelist) {
+            return ctx.reply('❌ Server sedang penuh atau tidak tersedia untuk negara ini.');
         }
 
-        // BUAT TOMBOL HARGA DARI PRICELIST
+        // Susun tombol harga dari pricelist
         const buttons = country.pricelist.map(p => [
             Markup.button.callback(
-                `💰 Server ${p.server_id} - ${p.price_format} (Stok: ${p.stock})`, 
+                `💰 Server ${p.server_id} - ${p.price_format}`, 
                 `opr_${numId}_${p.provider_id}_${p.price}_${country.iso_code}`
             )
         ]);
 
-        buttons.push([Markup.button.callback('⬅️ Kembali Pilih Negara', `svc_${svcId}`)]);
+        buttons.push([Markup.button.callback('⬅️ Kembali', `svc_${svcId}`)]);
 
-        await ctx.editMessageCaption(`💵 *Pilih Server & Harga untuk ${country.name}:*\nLayanan: ${country.prefix}`, {
+        await ctx.editMessageCaption(`💵 *Pilih Server&Harga untuk ${country.name}:*`, {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard(buttons)
         });
 
-    } catch (e) { 
-        console.error("ERROR HARGA SERVER:", e.message);
-        ctx.reply('❌ Gagal memuat daftar harga. Cek koneksi VPS.'); 
+    } catch (e) {
+        console.error("ERROR NYANGKUT DI SINI:", e.message);
+        ctx.reply('❌ Terjadi kesalahan saat memproses harga.');
     }
 });
 
