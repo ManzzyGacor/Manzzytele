@@ -326,8 +326,8 @@ bot.action(/^opr_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
     }
 });
 
-// --- 5. STEP: KONFIRMASI ---
-bot.action(/^cfm_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
+// --- 5. STEP: KONFIRMASI (FIXED CALLBACK) ---
+bot.action(/^cf_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
     const [_, numId, provId, opId, price] = ctx.match;
 
     const msg = `🛒 *KONFIRMASI PESANAN*\n━━━━━━━━━━━━━━━━━━\n` +
@@ -338,61 +338,62 @@ bot.action(/^cfm_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
     await ctx.editMessageCaption(msg, {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
-            [Markup.button.callback('✅ BELI SEKARANG', `ex_${numId}_${provId}_${opId}_${price}`)],
+            // Kita pakai prefix 'buy_' agar unik dan tidak bentrok regex lain
+            [Markup.button.callback('✅ BELI SEKARANG', `buy_${numId}_${provId}_${opId}_${price}`)],
             [Markup.button.callback('❌ BATAL', 'start_menu')]
         ])
     });
 });
-// --- 6. EKSEKUSI ORDER (FIX STUCK) ---
-bot.action(/^exec_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
-    // Kita pakai prefix 'op' di opId biar regex gak bingung
-    const [_, numId, provId, opRaw, price] = ctx.match;
-    const opId = opRaw.replace('op', ''); 
+
+// --- 6. STEP: EKSEKUSI ORDER (FIXED NO RESPONSE) ---
+bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
+    const [_, numId, provId, opId, price] = ctx.match;
     const userId = ctx.from.id;
 
     try {
-        await ctx.answerCbQuery('Memproses pesanan...');
-        
-        // 1. Cek Saldo User di DB Manzzy ID
+        // 1. Berikan feedback loading ke user agar tidak "stuck"
+        await ctx.answerCbQuery('⏳ Sedang memproses nomor...', { show_alert: false });
+
+        // 2. Cek Saldo User di Database Manzzy ID
         const user = await User.findOne({ telegramId: userId });
         if (!user || user.saldo < parseInt(price)) {
-            return ctx.reply('❌ Saldo Manzzy ID Anda tidak cukup! Silakan isi saldo terlebih dahulu.');
+            return ctx.reply('❌ Saldo Anda tidak cukup! Silakan isi saldo terlebih dahulu.');
         }
 
-        // 2. Tembak API RumahOTP (PASTIKAN PARAMETER BENAR)
-        // URL: /v2/orders?number_id=ID&provider_id=ID&operator_id=ID
-        const orderRes = await roApi.get(`/v2/orders?number_id=${numId}&provider_id=${provId}&operator_id=${opId}`);
+        // 3. Tembak API RumahOTP
+        const url = `/v2/orders?number_id=${numId}&provider_id=${provId}&operator_id=${opId}`;
+        const orderRes = await roApi.get(url);
         
         if (orderRes.data.success) {
             const order = orderRes.data.data;
             
-            // 3. POTONG SALDO (Hanya jika API Sukses)
+            // 4. Potong Saldo User
             user.saldo -= parseInt(price);
             await user.save();
 
-            const orderMsg = `✅ *NOMOR BERHASIL DIDAPATKAN!*\n━━━━━━━━━━━━━━━━━━\n` +
-                             `📞 Nomor: \`${order.phone_number}\`\n` +
-                             `🆔 Order ID: \`${order.order_id}\`\n` +
-                             `💰 Harga: Rp ${order.price}\n\n` +
-                             `🕒 _Silakan gunakan nomor tersebut. Klik tombol di bawah untuk cek OTP._`;
+            const successMsg = `✅ *NOMOR BERHASIL DIDAPATKAN!*\n━━━━━━━━━━━━━━━━━━\n` +
+                               `📱 Layanan: *${order.service}*\n` +
+                               `📞 Nomor: \`${order.phone_number}\`\n` +
+                               `🆔 Order ID: \`${order.order_id}\`\n` +
+                               `💰 Harga: Rp ${order.price}\n━━━━━━━━━━━━━━━━━━\n` +
+                               `🕒 _Silakan gunakan nomor tersebut. Jika OTP masuk, klik tombol di bawah._`;
 
-            await ctx.reply(orderMsg, {
+            await ctx.reply(successMsg, {
                 parse_mode: 'Markdown',
                 ...Markup.inlineKeyboard([
                     [Markup.button.callback('📩 CEK OTP', `status_${order.order_id}`)],
-                    [Markup.button.callback('❌ CANCEL & REFUND', `cancel_${order.order_id}_${price}`)]
+                    [Markup.button.callback('❌ BATALKAN & REFUND', `cancel_${order.order_id}_${price}`)]
                 ])
             });
         } else {
-            // Jika sukses: false dari API (stok habis dll)
-            ctx.reply(`❌ Gagal: ${orderRes.data.message || 'Stok habis atau gangguan server.'}`);
+            ctx.reply(`❌ Gagal: ${orderRes.data.message || 'Stok habis atau server provider gangguan.'}`);
         }
     } catch (e) {
         console.error("ERROR EXEC ORDER:", e.response?.data || e.message);
-        ctx.reply('❌ Terjadi kesalahan sistem saat menghubungi provider.');
+        ctx.reply('❌ Terjadi kesalahan sistem. Coba beberapa saat lagi.');
     }
 });
-// STEP 5: Cek Status OTP
+// STEP 7: Cek Status OTP
 bot.action(/^status_(.+)$/, async (ctx) => {
     const orderId = ctx.match[1];
     try {
@@ -407,7 +408,7 @@ bot.action(/^status_(.+)$/, async (ctx) => {
     } catch (e) { ctx.answerCbQuery('Gagal cek status.'); }
 });
 
-// STEP 6: Batalkan Pesanan (Refund Saldo)
+// STEP 8: Batalkan Pesanan (Refund Saldo)
 bot.action(/^cancel_(.+)$/, async (ctx) => {
     const orderId = ctx.match[1];
     try {
