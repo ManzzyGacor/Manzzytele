@@ -359,21 +359,31 @@ bot.action(/^spg_(.+)_(.+)$/, async (ctx) => {
 
         // Buat Grid Server (S1, S2, dst) 3 Kolom
       const serverButtons = [];
-const list = country.pricelist;
+        const list = country.pricelist;
 
-for (let i = 0; i < list.length; i += 3) {
-    const row = list.slice(i, i + 3).map((p, idx) => {
-        // HITUNG HARGA JUAL
-        const jualPrice = calculatePrice(p.price); 
+        // Fungsi pembulatan & profit (Pastikan ada di atas file)
+        const calculatePrice = (apiPrice) => {
+            const PROFIT_PERCENT = 15; // Kamu untung 15%
+            const markup = (apiPrice * PROFIT_PERCENT) / 100;
+            // Dibulatkan ke atas ke kelipatan 100 terdekat
+            return Math.ceil((apiPrice + markup) / 100) * 100;
+        };
+
+        for (let i = 0; i < list.length; i += 3) {
+            const row = list.slice(i, i + 3).map((p, idx) => {
+                // Kita hitung harga jualnya di sini
+                const hargaJual = calculatePrice(p.price);
+                
+                // Tampilan tombol tetap S1, S2, dst. 
+                // Tapi datanya membawa hargaJual (Modal + Profit)
+                return Markup.button.callback(
+                    `🖥️ S${i + idx + 1} - Rp${hargaJual.toLocaleString('id-ID')}`, 
+                    `opr_${numId}_${p.provider_id}_${hargaJual}_${country.iso_code}`
+                );
+            });
+            serverButtons.push(row);
+        }
         
-        return Markup.button.callback(
-            `🖥️ S${i + idx + 1} - Rp${jualPrice.toLocaleString('id-ID')}`, 
-            `opr_${numId}_${p.provider_id}_${jualPrice}_${country.iso_code}`
-        );
-    });
-    serverButtons.push(row);
-}
-
         serverButtons.push([Markup.button.callback('⬅️ Kembali', `svc_${svcId}`)]);
 
         const caption = `*${country.prefix} PILIH SERVER - ${country.name.toUpperCase()}*\n\n` +
