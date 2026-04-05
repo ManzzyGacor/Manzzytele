@@ -205,83 +205,88 @@ const createGrid = (data, prefix, page = 0, columns = 2, rows = 8) => {
     return { keyboard, totalPages, totalItems: data.length };
 };
 
-// --- STEP 2: PILIH NEGARA (TAMPILAN GRID) ---
+// --- STEP 2: PILIH NEGARA (PASTIKAN SERVICE ID TERIKUT) ---
 bot.action(/^(svc_(.+)|svcpg_(.+)_(.+))$/, async (ctx) => {
     const serviceId = ctx.match[2] || ctx.match[3];
     const page = ctx.match[4] ? parseInt(ctx.match[4]) : 0;
 
     try {
-        await ctx.answerCbQuery();
+        await ctx.answerCbQuery('Memuat Negara...');
         const res = await roApi.get(`/v2/countries?service_id=${serviceId}`);
-        const dataRaw = res.data.data;
+        
+        // Cek apakah data ada
+        if (!res.data || !res.data.data) return ctx.reply('❌ Gagal mengambil data dari pusat.');
 
-        const countries = dataRaw.map(c => ({
-            text: `🇮🇩 ${c.name}`, // Catatan: Bendera idealnya dinamis tapi untuk grid kita pakai emoji/prefix
+        const countries = res.data.data.map(c => ({
+            text: `🌍 ${c.name}`,
+            // Kirim: spg_[serviceId]_[numberId]
             id: `${serviceId}_${c.number_id}`
         }));
 
-        const grid = createGrid(countries, `spg_${serviceId}`, page, 2, 8);
+        // Buat Grid 2 Kolom
+        const grid = [];
+        const start = page * 16; // 8 baris x 2 kolom
+        const pagedData = countries.slice(start, start + 16);
 
-        const caption = `🌍 *PILIH NEGARA - WHATSAPP*\n\n` +
-                        `Layanan: WhatsApp\n` +
-                        `Total Negara: ${grid.totalItems}\n` +
-                        `Halaman: ${page + 1}/${grid.totalPages}\n\n` +
-                        `📋 *DAFTAR NEGARA*\nPilih negara untuk melanjutkan:`;
+        for (let i = 0; i < pagedData.length; i += 2) {
+            grid.push(pagedData.slice(i, i + 2).map(c => 
+                Markup.button.callback(c.text, `spg_${c.id}`)
+            ));
+        }
 
-        await ctx.editMessageCaption(caption, {
+        // Navigasi
+        const nav = [];
+        if (page > 0) nav.push(Markup.button.callback('⬅️ Prev', `svcpg_${serviceId}_${page - 1}`));
+        if (start + 16 < countries.length) nav.push(Markup.button.callback('Next ➡️', `svcpg_${serviceId}_${page + 1}`));
+        if (nav.length > 0) grid.push(nav);
+        grid.push([Markup.button.callback('🏠 Menu', 'start_menu')]);
+
+        await ctx.editMessageCaption(`🌍 *PILIH NEGARA*\nLayanan ID: ${serviceId}\nHalaman: ${page + 1}`, {
             parse_mode: 'Markdown',
-            ...Markup.inlineKeyboard(grid.keyboard)
+            ...Markup.inlineKeyboard(grid)
         });
     } catch (e) { ctx.reply('❌ Gagal memuat negara.'); }
 });
 
-// --- STEP 3: PILIH SERVER (GRID S1, S2, dst) ---
+// --- STEP 3: PILIH SERVER (FIXED FIND ERROR) ---
 bot.action(/^spg_(.+)_(.+)$/, async (ctx) => {
-    // svcId = ID Aplikasi (misal 13), numId = ID Negara
-    const svcId = ctx.match[1]; 
-    const numId = ctx.match[2];
+    const svcId = ctx.match[1]; // ID Aplikasi
+    const numId = ctx.match[2]; // ID Negara
 
     try {
         await ctx.answerCbQuery('Memuat Server...');
 
-        // Ambil data dari API berdasarkan Service ID
         const res = await roApi.get(`/v2/countries?service_id=${svcId}`);
         
-        // Cari negara (Gunakan == agar String vs Number tidak masalah)
-        const country = res.data.data.find(c => c.number_id == numId);
-        
-        if (!country || !country.pricelist) {
-            console.log(`[DEBUG] Negara tidak ketemu. ID: ${numId}`);
-            return ctx.reply('❌ Maaf, data server untuk negara ini tidak ditemukan.');
+        // Validasi data API sebelum .find()
+        if (!res.data || !res.data.data) {
+            throw new Error("Data API Kosong");
         }
 
-        // Susun Tombol Server (S1, S2, S3...) Grid 3 Kolom
-        const serverButtons = [];
-        const pricelist = country.pricelist;
+        const country = res.data.data.find(c => String(c.number_id) === String(numId));
+        
+        if (!country || !country.pricelist) {
+            return ctx.reply('❌ Server tidak tersedia untuk negara ini.');
+        }
 
-        for (let i = 0; i < pricelist.length; i += 3) {
-            const row = pricelist.slice(i, i + 3).map((p, idx) => {
-                // p.provider_id dan p.price dibawa ke tahap OPERATOR
-                return Markup.button.callback(
-                    `🖥️ S${i + idx + 1}`, 
-                    `opr_${numId}_${p.provider_id}_${p.price}_${country.iso_code}`
-                );
+        // Buat Grid Server (S1, S2, dst) 3 Kolom
+        const serverButtons = [];
+        const list = country.pricelist;
+
+        for (let i = 0; i < list.length; i += 3) {
+            const row = list.slice(i, i + 3).map((p, idx) => {
+                return Markup.button.callback(`🖥️ S${i + idx + 1}`, `opr_${numId}_${p.provider_id}_${p.price}_${country.iso_code}`);
             });
             serverButtons.push(row);
         }
 
-        // Navigasi Bawah
-        serverButtons.push([
-            Markup.button.callback('⬅️ Kembali', `svc_${svcId}`),
-            Markup.button.callback('🏠 Menu', 'start_menu')
-        ]);
+        serverButtons.push([Markup.button.callback('⬅️ Kembali', `svc_${svcId}`)]);
 
         const caption = `*${country.prefix} PILIH SERVER - ${country.name.toUpperCase()}*\n\n` +
                         `Layanan: WhatsApp\n` +
-                        `Negara: ${country.prefix} ${country.name}\n` +
                         `Stok: ${country.stock_total} nomor\n` +
-                        `Server: ${pricelist.length} tersedia\n\n` +
-                        `📋 *DAFTAR SERVER TERSEDIA*\nPilih server untuk melanjutkan:`;
+                        `Server: ${list.length} tersedia\n\n` +
+                        `📋 *DAFTAR SERVER TERSEDIA*`;
 
         await ctx.editMessageCaption(caption, {
             parse_mode: 'Markdown',
@@ -290,7 +295,7 @@ bot.action(/^spg_(.+)_(.+)$/, async (ctx) => {
 
     } catch (e) {
         console.error("ERROR STEP 3:", e.message);
-        ctx.reply('❌ Gagal memuat server. Pastikan koneksi stabil.');
+        ctx.reply('❌ Gagal memuat server. Coba klik ulang negara.');
     }
 });
 // --- 4. STEP: PILIH OPERATOR ---
