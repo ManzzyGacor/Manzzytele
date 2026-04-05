@@ -584,10 +584,9 @@ bot.action('topup_menu', async (ctx) => {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard([
                 [
-                Markup.button.callback('Rp 2.000', 'depo_2000'), 
-                    Markup.button.callback('Rp 5.000', 'depo_5000'), 
-                    Markup.button.callback('Rp 10.000', 'depo_10000'),
-                    Markup.button.callback('Rp 15.000', 'depo_15000')
+                    Markup.button.callback('Rp 2.000', 'depo_2000'), 
+                    Markup.button.callback('Rp 5.000', 'depo_5000'),
+                    Markup.button.callback('Rp 10.000', 'depo_10000')
                 ],
                 [
                     Markup.button.callback('Rp 20.000', 'depo_20000'),
