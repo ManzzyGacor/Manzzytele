@@ -360,22 +360,14 @@ bot.action(/^spg_(.+)_(.+)$/, async (ctx) => {
         // Buat Grid Server (S1, S2, dst) 3 Kolom
       const serverButtons = [];
         const list = country.pricelist;
-
-        // Fungsi pembulatan & profit (Pastikan ada di atas file)
-        const calculatePrice = (apiPrice) => {
-            const PROFIT_PERCENT = 15; // Kamu untung 15%
-            const markup = (apiPrice * PROFIT_PERCENT) / 100;
-            // Dibulatkan ke atas ke kelipatan 100 terdekat
-            return Math.ceil((apiPrice + markup) / 100) * 100;
-        };
+        const PROFIT_PERCENT = 15; // Set profit kamu di sini (misal 15%)
 
         for (let i = 0; i < list.length; i += 3) {
             const row = list.slice(i, i + 3).map((p, idx) => {
-                // Kita hitung harga jualnya di sini
-                const hargaJual = calculatePrice(p.price);
-                
-                // Tampilan tombol tetap S1, S2, dst. 
-                // Tapi datanya membawa hargaJual (Modal + Profit)
+                // RUMUS: Harga Asli + (Harga Asli * Profit / 100)
+                // Terus kita bulatkan ke atas (Math.ceil) biar ga ada desimal
+                const hargaJual = Math.ceil((p.price + (p.price * PROFIT_PERCENT / 100)) / 100) * 100;
+
                 return Markup.button.callback(
                     `🖥️ S${i + idx + 1} - Rp${hargaJual.toLocaleString('id-ID')}`, 
                     `opr_${numId}_${p.provider_id}_${hargaJual}_${country.iso_code}`
@@ -383,7 +375,6 @@ bot.action(/^spg_(.+)_(.+)$/, async (ctx) => {
             });
             serverButtons.push(row);
         }
-        
         serverButtons.push([Markup.button.callback('⬅️ Kembali', `svc_${svcId}`)]);
 
         const caption = `*${country.prefix} PILIH SERVER - ${country.name.toUpperCase()}*\n\n` +
@@ -449,9 +440,13 @@ bot.action(/^cf_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
 
 // --- 6. STEP: EKSEKUSI ORDER ---
 bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
-    const [_, numId, provId, opId, priceJual] = ctx.match;
+    // Urutan: 1.numId, 2.provId, 3.priceJual, 4.iso
+    const [_, numId, provId, priceJual, iso] = ctx.match; 
+    
     const userId = ctx.from.id;
+    const user = await User.findOne({ telegramId: userId });
 
+   
     try {
         await ctx.answerCbQuery('⏳ Memproses...', { show_alert: false });
 
