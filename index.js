@@ -27,45 +27,78 @@ const roApi = axios.create({
 // --- HELPER ---
 const formatIDR = (val) => `Rp ${val.toLocaleString('id-ID')}`;
 
-// --- MENU BUTTONS ---
-const mainKeyboard = (isAdmin) => {
-    const btns = [
-        [Markup.button.callback('🛍️ Beli Nokos', 'list_services'), Markup.button.callback('💰 Isi Saldo', 'deposit')],
-        [Markup.button.callback('👤 Profil', 'profile'), Markup.button.callback('🆘 Bantuan', 'support')]
-    ];
-    if (isAdmin) btns.push([Markup.button.callback('🛠️ Panel Owner', 'owner_panel')]);
-    return Markup.inlineKeyboard(btns);
+const CHANNEL_ID = process.env.CHANNEL_ID;
+
+// --- FUNGSI CEK MEMBER ---
+const checkJoin = async (ctx) => {
+    try {
+        const member = await ctx.telegram.getChatMember(CHANNEL_ID, ctx.from.id);
+        // Status yang dianggap sudah join: member, administrator, atau creator
+        return ['member', 'administrator', 'creator'].includes(member.status);
+    } catch (e) {
+        return false;
+    }
 };
 
-// --- LOGIKA UTAMA ---
+// --- HANDLER START & MENU ---
+const sendMainMenu = async (ctx) => {
+    const isJoined = await checkJoin(ctx);
 
-bot.start(async (ctx) => {
+    if (!isJoined) {
+        return ctx.reply(`👋 Halo ${ctx.from.first_name}!\n\nSebelum menggunakan bot **Manzzy ID**, kamu wajib bergabung di channel pusat kami terlebih dahulu.`, {
+            ...Markup.inlineKeyboard([
+                [Markup.button.url('📢 Join Channel', 'https://t.me/Manzzy_ID')], // Ganti link sesuai channelmu
+                [Markup.button.callback('✅ SAYA SUDAH JOIN', 'verify_join')]
+            ])
+        });
+    }
+
+    // Jika sudah join, tampilkan menu utama
+    const menuMsg = `🎯 *MAIN MENU MANZZY ID*\n\nSelamat datang kembali! Silakan pilih layanan di bawah ini:`;
+    await ctx.replyWithPhoto('https://raw.githubusercontent.com/ManzzyGacor/Urlmanzzy/main/file_1775385903372_357.jpg', { // Opsional: Tambah foto banner
+        caption: menuMsg,
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+            [Markup.button.callback('🛒 Beli Nomor (Nokos)', 'list_services')],
+            [Markup.button.callback('💰 Isi Saldo', 'topup_menu'), Markup.button.callback('👤 Profil', 'user_profile')],
+            [Markup.button.callback('📜 Riwayat', 'history'), Markup.button.callback('📞 Support', 'support_contact')]
+        ])
+    });
+};
+
+// Command /start
+bot.start((ctx) => sendMainMenu(ctx));
+
+// Command /menu (Sekarang sudah bisa)
+bot.command('menu', (ctx) => sendMainMenu(ctx));
+
+// --- HANDLER VERIFIKASI (DENGAN LOADING KEREN) ---
+bot.action('verify_join', async (ctx) => {
     try {
-        const isOwner = ctx.from.id === OWNER_ID;
-        let user = await User.findOneAndUpdate(
-            { telegramId: ctx.from.id },
-            { username: ctx.from.username, firstName: ctx.from.first_name },
-            { upsert: true, new: true }
-        );
+        // 1. Animasi Loading (Validasi)
+        await ctx.editMessageText('🔄 *Sedang memvalidasi data...*', { parse_mode: 'Markdown' });
+        
+        // Kasih delay 1.5 detik biar kerasa "loading"
+        await new Promise(resolve => setTimeout(resolve, 1500));
 
-        const caption = `👋 *Halo ${ctx.from.first_name}!*\nSelamat datang di *Manzzy ID*.\n\n💰 Saldo: *${formatIDR(user.saldo)}*`;
+        const isJoined = await checkJoin(ctx);
 
-        // Gunakan TRY CATCH khusus untuk foto
-        try {
-            await ctx.replyWithPhoto('https://raw.githubusercontent.com/ManzzyGacor/Urlmanzzy/main/file_1775385903372_357.jpg', {
-                caption: caption,
+        if (isJoined) {
+            await ctx.answerCbQuery('✅ Verifikasi Berhasil! Selamat datang.', { show_alert: false });
+            await ctx.deleteMessage(); // Hapus pesan verifikasi
+            return sendMainMenu(ctx); // Kirim menu utama
+        } else {
+            await ctx.answerCbQuery('⚠️ Kamu belum join channel kami!', { show_alert: true });
+            await ctx.editMessageText(`❌ *Verifikasi Gagal!*\n\nKamu benar-benar harus join channel dulu sebelum bisa lanjut, Bre.`, {
                 parse_mode: 'Markdown',
-                ...mainKeyboard(isOwner)
-            });
-        } catch (photoError) {
-            // Kalau foto gagal, kirim teks aja biar bot nggak mati
-            await ctx.reply(caption, {
-                parse_mode: 'Markdown',
-                ...mainKeyboard(isOwner)
+                ...Markup.inlineKeyboard([
+                    [Markup.button.url('📢 Join Channel', 'https://t.me/Manzzy_ID')],
+                    [Markup.button.callback('🔄 COBA LAGI', 'verify_join')]
+                ])
             });
         }
-    } catch (err) {
-        console.error("ERROR START:", err);
+    } catch (e) {
+        ctx.reply('Terjadi kesalahan verifikasi.');
     }
 });
 // --- FITUR OWNER (ADD SALDO) ---
@@ -359,33 +392,40 @@ bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
         const url = `/v2/orders?number_id=${numId}&provider_id=${provId}&operator_id=${opId}`;
         const orderRes = await roApi.get(url);
         
-        if (orderRes.data.success) {
+if (orderRes.data && orderRes.data.success === true) {
             const order = orderRes.data.data;
             
             user.saldo -= parseInt(price);
             await user.save();
 
-            const successMsg = `✅ *NOMOR DIDAPATKAN!*\n━━━━━━━━━━━━━━━━━━\n` +
+            const successMsg = `✅ *NOMOR BERHASIL DIDAPATKAN!*\n━━━━━━━━━━━━━━━━━━\n` +
+                               `📱 Layanan: *${order.service}*\n` +
                                `📞 Nomor: \`${order.phone_number}\`\n` +
                                `🆔 Order ID: \`${order.order_id}\`\n` +
-                               `💰 Harga: Rp ${parseInt(price).toLocaleString('id-ID')}\n━━━━━━━━━━━━━━━━━━`;
+                               `💰 Harga: Rp ${parseInt(price).toLocaleString('id-ID')}\n━━━━━━━━━━━━━━━━━━\n` +
+                               `🕒 _Silakan gunakan nomor tersebut. Jika OTP masuk, klik tombol di bawah._`;
 
             await ctx.reply(successMsg, {
                 parse_mode: 'Markdown',
                 ...Markup.inlineKeyboard([
                     [Markup.button.callback('📩 CEK OTP', `status_${order.order_id}`)],
-                    [Markup.button.callback('❌ REFUND & CANCEL', `cncl_${order.order_id}_${price}`)]
+                    [Markup.button.callback('❌ BATALKAN & REFUND', `cncl_${order.order_id}_${price}`)]
                 ])
             });
         } else {
-            ctx.reply(`❌ Gagal: ${orderRes.data.message}`);
+            // JIKA GAGAL: Cek apakah ada message dari API, jika tidak tampilkan teks default
+            const alasanGagal = orderRes.data?.message || "Stok sedang kosong atau server provider gangguan.";
+            ctx.reply(`❌ Gagal: ${alasanGagal}`);
         }
     } catch (e) {
-        ctx.reply('❌ Sistem error saat beli.');
+        // Cek error dari axios response jika ada
+        const errorDetail = e.response?.data?.message || "Terjadi gangguan koneksi ke server provider.";
+        console.error("ERROR EXEC ORDER:", e.message);
+        ctx.reply(`❌ Gagal: ${errorDetail}`);
     }
 });
 
-// --- 7. STEP: CEK OTP ---
+// step 7
 bot.action(/^status_(.+)$/, async (ctx) => {
     const orderId = ctx.match[1];
     try {
@@ -393,11 +433,49 @@ bot.action(/^status_(.+)$/, async (ctx) => {
         const data = res.data.data;
 
         if (data.otp_code) {
-            await ctx.reply(`📩 *OTP DITERIMA!*\n\nKode: \`${data.otp_code}\`\nPesan: \`${data.otp_msg}\``, { parse_mode: 'Markdown' });
+            // KIRIM TESTI KE CHANNEL (Hanya jika kodenya ada)
+            // Kita bungkus biar nggak dobel kirim kalau user klik 'Cek OTP' berkali-kali
+            // (Opsional: Kamu bisa simpan di DB kalau sudah pernah dikirim, tapi ini versi simpelnya)
+            
+            const msg = `📩 *OTP DITERIMA!*\n\n🔢 Kode: \`${data.otp_code}\`\n📝 Pesan: \`${data.otp_msg}\``;
+
+            await ctx.reply(msg, { 
+                parse_mode: 'Markdown',
+                ...Markup.inlineKeyboard([
+                    [Markup.button.callback('✅ SELESAIKAN ORDER', `done_${orderId}`)]
+                ])
+            });
+
+            // Kirim ke Channel
+            await sendTesti({
+                username: ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name,
+                service: data.service,
+                country: data.country,
+                price: data.price || 0, // Pastikan field ini ada di res API atau ambil dari context
+                orderId: orderId
+            });
+
         } else {
-            await ctx.answerCbQuery('Belum ada OTP. Tunggu sebentar lagi!', { show_alert: true });
+            await ctx.answerCbQuery('📭 Belum ada OTP masuk.', { show_alert: true });
         }
     } catch (e) { ctx.answerCbQuery('Gagal cek status.'); }
+});
+// --- 9. STEP: SELESAIKAN ORDER (BARU KONFIRMASI) ---
+bot.action(/^done_(.+)$/, async (ctx) => {
+    const orderId = ctx.match[1];
+    try {
+        await ctx.answerCbQuery('Menyelesaikan...');
+        // Baru di sini kita tembak SET_STATUS dengan parameter DONE
+        const res = await roApi.get(`/v1/orders/set_status?order_id=${orderId}&status=done`);
+        
+        if (res.data.success) {
+            await ctx.reply(`✅ *ORDER SELESAI*\nNomor untuk Order ID \`${orderId}\` telah dikonfirmasi selesai. Terima kasih!`);
+            // Opsional: Hapus pesan tombol biar gak diklik lagi
+            try { await ctx.deleteMessage(); } catch (err) {}
+        }
+    } catch (e) {
+        ctx.reply('❌ Gagal menyelesaikan order.');
+    }
 });
 
 // --- 8. STEP: CANCEL & REFUND (SANGAT PENTING) ---
@@ -428,6 +506,28 @@ bot.action(/^cncl_(.+)_(.+)$/, async (ctx) => {
     }
 });
 
+// NOTIF TESTI KE CHANNEL
+const CHANNEL_ID = process.env.CHANNEL_ID; // Pastikan sudah diisi di .env
+
+// --- FUNGSI KIRIM TESTIMONI OTOMATIS ---
+const sendTesti = async (data) => {
+    const text = `🛒 *TESTIMONI PEMBELIAN BERHASIL*\n` +
+                 `━━━━━━━━━━━━━━━━━━\n` +
+                 `👤 User: ${data.username || 'Hidden'}\n` +
+                 `📱 Layanan: *${data.service}*\n` +
+                 `🌍 Negara: *${data.country}*\n` +
+                 `💰 Harga: *Rp ${parseInt(data.price).toLocaleString('id-ID')}*\n` +
+                 `🆔 Order ID: \`${data.orderId}\`\n` +
+                 `━━━━━━━━━━━━━━━━━━\n` +
+                 `✅ *STATUS:* Nomor Aktif & OTP Berhasil!\n` +
+                 `🤖 Beli di: @${process.env.BOT_USERNAME || 'ManzzyID_Bot'}`;
+
+    try {
+        await bot.telegram.sendMessage(CHANNEL_ID, text, { parse_mode: 'Markdown' });
+    } catch (e) {
+        console.error("Gagal kirim testi ke channel:", e.message);
+    }
+};
 
 // --- 4. RUN BOT ---
 bot.launch().then(() => {
