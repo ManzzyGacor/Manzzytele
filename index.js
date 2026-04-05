@@ -701,40 +701,51 @@ bot.action(/^canceldepo_(.+)$/, async (ctx) => {
     }
 });
 
-// --- HANDLER INPUT TEKS (UNTUK NOMINAL MANUAL) ---
 bot.on('text', async (ctx) => {
-    // 1. Abaikan jika pesan diawali '/' (command)
+    // 1. Abaikan kalau ini command /start, /menu, dll
     if (ctx.message.text.startsWith('/')) return;
 
-    // 2. Ambil angka saja
-    const rawText = ctx.message.text.replace(/[^0-9]/g, '');
-    const input = parseInt(rawText);
-
-    console.log(`[DEBUG] User ${ctx.from.id} menginput teks: ${ctx.message.text} | Hasil parse: ${input}`);
-
-    // 3. Validasi apakah benar angka
-    if (!isNaN(input) && rawText !== "") {
-        // Cek Minimum Rp 2.000
-        if (input < 2000) {
-            return ctx.reply('⚠️ *Minimal Top Up adalah Rp 2.000*, Bre!\nSilakan masukkan nominal yang lebih besar.', { parse_mode: 'Markdown' });
-        }
-
-        // 4. Konfirmasi Nominal
-        const msg = `💳 *KONFIRMASI TOP UP*\n━━━━━━━━━━━━━━━━━━\n` +
-                    `💰 Nominal: *Rp ${input.toLocaleString('id-ID')}*\n` +
-                    `📝 Metode: *QRIS (Otomatis)*\n━━━━━━━━━━━━━━━━━━\n` +
-                    `Apakah data di atas sudah benar?`;
-
-        return ctx.reply(msg, {
-            parse_mode: 'Markdown',
-            ...Markup.inlineKeyboard([
-                [Markup.button.callback('✅ Lanjut Bayar', `depo_${input}`)],
-                [Markup.button.callback('❌ Batal', 'topup_menu')]
-            ])
-        });
-    }
+    const userId = ctx.from.id;
     
-    // Jika user ngetik teks biasa (bukan angka), bot diam saja atau kasih bantuan
+    try {
+        // 2. Ambil data user dari DB
+        const user = await User.findOne({ telegramId: userId });
+
+        // 3. CEK: Apakah user memang sedang di mode Top Up?
+        // Kalau statusTopup false, bot diem aja (nggak proses teks sebagai nominal)
+        if (!user || !user.statusTopup) return;
+
+        // 4. Ambil angka saja dari input
+        const rawText = ctx.message.text.replace(/[^0-9]/g, '');
+        const input = parseInt(rawText);
+
+        if (!isNaN(input) && rawText !== "") {
+            // Cek Minimum Rp 2.000
+            if (input < 2000) {
+                return ctx.reply('⚠️ *Minimal Top Up adalah Rp 2.000*, Bre!\nSilakan masukkan nominal yang lebih besar.', { parse_mode: 'Markdown' });
+            }
+
+            // SETELAH INPUT BENAR, MATIKAN STATUS TOPUP (Biar nggak looping)
+            user.statusTopup = false;
+            await user.save();
+
+            // 5. Kirim Konfirmasi
+            const msg = `💳 *KONFIRMASI TOP UP*\n━━━━━━━━━━━━━━━━━━\n` +
+                        `💰 Nominal: *Rp ${input.toLocaleString('id-ID')}*\n` +
+                        `📝 Metode: *QRIS (Otomatis)*\n━━━━━━━━━━━━━━━━━━\n` +
+                        `Apakah data di atas sudah benar?`;
+
+            return ctx.reply(msg, {
+                parse_mode: 'Markdown',
+                ...Markup.inlineKeyboard([
+                    [Markup.button.callback('✅ Lanjut Bayar', `depo_${input}`)],
+                    [Markup.button.callback('❌ Batal', 'topup_menu')]
+                ])
+            });
+        }
+    } catch (e) {
+        console.error("ERROR TEXT HANDLER:", e.message);
+    }
 });
 // --- 4. RUN BOT ---
 bot.launch().then(() => {
