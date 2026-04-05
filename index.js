@@ -180,68 +180,99 @@ bot.action(/^(list_services|svcpage_(.+))$/, async (ctx) => {
     } catch (e) { ctx.reply('❌ Gagal ambil layanan.'); }
 });
 
-// --- STEP 2: PILIH NEGARA ---
-bot.action(/^(svc_(.+)|ctypage_(.+)_(.+))$/, async (ctx) => {
+// --- HELPER UNTUK MEMBUAT TOMBOL GRID ---
+const createGrid = (data, prefix, page = 0, columns = 2, rows = 8) => {
+    const itemsPerPage = columns * rows;
+    const totalPages = Math.ceil(data.length / itemsPerPage);
+    const start = page * itemsPerPage;
+    const items = data.slice(start, start + itemsPerPage);
+
+    const keyboard = [];
+    for (let i = 0; i < items.length; i += columns) {
+        keyboard.push(items.slice(i, i + columns).map(item => 
+            Markup.button.callback(item.text, `${prefix}_${item.id}`)
+        ));
+    }
+
+    // Navigasi
+    const navRow = [];
+    if (page > 0) navRow.push(Markup.button.callback('⬅️ Sebelumnya', `${prefix}pg_${page - 1}`));
+    if (page < totalPages - 1) navRow.push(Markup.button.callback('Selanjutnya ➡️', `${prefix}pg_${page + 1}`));
+    if (navRow.length > 0) keyboard.push(navRow);
+
+    keyboard.push([Markup.button.callback('🔙 Kembali', 'list_services'), Markup.button.callback('🏠 Menu', 'start_menu')]);
+    
+    return { keyboard, totalPages, totalItems: data.length };
+};
+
+// --- STEP 2: PILIH NEGARA (TAMPILAN GRID) ---
+bot.action(/^(svc_(.+)|svcpg_(.+)_(.+))$/, async (ctx) => {
     const serviceId = ctx.match[2] || ctx.match[3];
     const page = ctx.match[4] ? parseInt(ctx.match[4]) : 0;
 
     try {
-        await ctx.answerCbQuery('Memuat Negara...');
+        await ctx.answerCbQuery();
         const res = await roApi.get(`/v2/countries?service_id=${serviceId}`);
-        
-        if (!res.data.success) return ctx.reply('❌ Gagal ambil data dari pusat.');
+        const dataRaw = res.data.data;
 
-        const countries = res.data.data.map(c => ({
-            text: `🌍 ${c.name}`,
-            // Callback: srv_[serviceId]_[numberId]
-            id: `srv_${serviceId}_${c.number_id}` 
+        const countries = dataRaw.map(c => ({
+            text: `🇮🇩 ${c.name}`, // Catatan: Bendera idealnya dinamis tapi untuk grid kita pakai emoji/prefix
+            id: `${serviceId}_${c.number_id}`
         }));
 
-        await ctx.editMessageCaption(`🌍 *Pilih Negara (Hal ${page + 1}):*`, {
+        const grid = createGrid(countries, `spg_${serviceId}`, page, 2, 8);
+
+        const caption = `🌍 *PILIH NEGARA - WHATSAPP*\n\n` +
+                        `Layanan: WhatsApp\n` +
+                        `Total Negara: ${grid.totalItems}\n` +
+                        `Halaman: ${page + 1}/${grid.totalPages}\n\n` +
+                        `📋 *DAFTAR NEGARA*\nPilih negara untuk melanjutkan:`;
+
+        await ctx.editMessageCaption(caption, {
             parse_mode: 'Markdown',
-            ...createPagination(countries, `cty_${serviceId}`, page)
+            ...Markup.inlineKeyboard(grid.keyboard)
         });
     } catch (e) { ctx.reply('❌ Gagal memuat negara.'); }
 });
 
-// --- STEP 3: PILIH HARGA/SERVER (PENYEBAB STUCK) ---
-bot.action(/^srv_(.+)_(.+)$/, async (ctx) => {
+// --- STEP 3: PILIH SERVER (TAMPILAN KOTAK S1, S2, dst) ---
+bot.action(/^spg_(.+)_(.+)$/, async (ctx) => {
     const [_, svcId, numId] = ctx.match;
-    
     try {
-        await ctx.answerCbQuery('Memuat Harga...');
-        
-        // Panggil ulang API dengan service_id yang benar
+        await ctx.answerCbQuery();
         const res = await roApi.get(`/v2/countries?service_id=${svcId}`);
-        
-        // Cari negara berdasarkan number_id (Gunakan == agar string/number tidak masalah)
         const country = res.data.data.find(c => c.number_id == numId);
         
-        if (!country || !country.pricelist) {
-            return ctx.reply('❌ Server sedang penuh atau tidak tersedia untuk negara ini.');
+        if (!country) return ctx.reply('❌ Data tidak ditemukan.');
+
+        // Tombol Server S1, S2, S3... (Grid 3 Kolom)
+        const servers = country.pricelist.map((p, index) => ({
+            text: `💻 S${p.server_id || index + 1}`,
+            id: `${numId}_${p.provider_id}_${p.price}_${country.iso_code}`
+        }));
+
+        // Kita buat grid 3 kolom untuk server
+        const grid = [];
+        for (let i = 0; i < servers.length; i += 3) {
+            grid.push(servers.slice(i, i + 3).map(s => 
+                Markup.button.callback(s.text, `opr_${s.id}`)
+            ));
         }
+        grid.push([Markup.button.callback('🔙 Kembali', `svc_${svcId}`), Markup.button.callback('🏠 Menu', 'start_menu')]);
 
-        // Susun tombol harga dari pricelist
-        const buttons = country.pricelist.map(p => [
-            Markup.button.callback(
-                `💰 Server ${p.server_id} - ${p.price_format}`, 
-                `opr_${numId}_${p.provider_id}_${p.price}_${country.iso_code}`
-            )
-        ]);
+        const caption = `*${country.prefix} PILIH SERVER - ${country.name.toUpperCase()}*\n\n` +
+                        `Layanan: WhatsApp\n` +
+                        `Negara: ${country.prefix} ${country.name}\n` +
+                        `Stok: ${country.stock_total} nomor\n` +
+                        `Server: ${servers.length} tersedia\n\n` +
+                        `📋 *DAFTAR SERVER TERSEDIA*\nPilih server untuk melanjutkan:`;
 
-        buttons.push([Markup.button.callback('⬅️ Kembali', `svc_${svcId}`)]);
-
-        await ctx.editMessageCaption(`💵 *Pilih Server&Harga untuk ${country.name}:*`, {
+        await ctx.editMessageCaption(caption, {
             parse_mode: 'Markdown',
-            ...Markup.inlineKeyboard(buttons)
+            ...Markup.inlineKeyboard(grid)
         });
-
-    } catch (e) {
-        console.error("ERROR NYANGKUT DI SINI:", e.message);
-        ctx.reply('❌ Terjadi kesalahan saat memproses harga.');
-    }
+    } catch (e) { ctx.reply('❌ Gagal memuat server.'); }
 });
-
 // --- 4. STEP: PILIH OPERATOR ---
 bot.action(/^opr_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
     const [_, numId, provId, price, iso] = ctx.match;
