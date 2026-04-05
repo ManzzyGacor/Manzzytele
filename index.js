@@ -578,14 +578,13 @@ bot.action('topup_menu', async (ctx) => {
                     `Metode: *QRIS Otomatis*\n` +
                     `Minimal: *Rp 2.000*\n\n` +
                     `📝 *Cara Top Up:*\n` +
-                    `• Pilih tombol nominal di bawah\n` +
-                    `• Atau *Ketik Langsung* nominalnya\n` +
-                    `  _(Contoh: ketik 15000)_`;
+                    `• Pilih tombol nominal di bawah_`;
         
         await ctx.editMessageCaption(msg, {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard([
                 [
+                Markup.button.callback('Rp 2.000', 'depo_2000'), 
                     Markup.button.callback('Rp 5.000', 'depo_5000'), 
                     Markup.button.callback('Rp 10.000', 'depo_10000'),
                     Markup.button.callback('Rp 15.000', 'depo_15000')
@@ -701,52 +700,6 @@ bot.action(/^canceldepo_(.+)$/, async (ctx) => {
     }
 });
 
-bot.on('text', async (ctx) => {
-    // 1. Abaikan kalau ini command /start, /menu, dll
-    if (ctx.message.text.startsWith('/')) return;
-
-    const userId = ctx.from.id;
-    
-    try {
-        // 2. Ambil data user dari DB
-        const user = await User.findOne({ telegramId: userId });
-
-        // 3. CEK: Apakah user memang sedang di mode Top Up?
-        // Kalau statusTopup false, bot diem aja (nggak proses teks sebagai nominal)
-        if (!user || !user.statusTopup) return;
-
-        // 4. Ambil angka saja dari input
-        const rawText = ctx.message.text.replace(/[^0-9]/g, '');
-        const input = parseInt(rawText);
-
-        if (!isNaN(input) && rawText !== "") {
-            // Cek Minimum Rp 2.000
-            if (input < 2000) {
-                return ctx.reply('⚠️ *Minimal Top Up adalah Rp 2.000*, Bre!\nSilakan masukkan nominal yang lebih besar.', { parse_mode: 'Markdown' });
-            }
-
-            // SETELAH INPUT BENAR, MATIKAN STATUS TOPUP (Biar nggak looping)
-            user.statusTopup = false;
-            await user.save();
-
-            // 5. Kirim Konfirmasi
-            const msg = `💳 *KONFIRMASI TOP UP*\n━━━━━━━━━━━━━━━━━━\n` +
-                        `💰 Nominal: *Rp ${input.toLocaleString('id-ID')}*\n` +
-                        `📝 Metode: *QRIS (Otomatis)*\n━━━━━━━━━━━━━━━━━━\n` +
-                        `Apakah data di atas sudah benar?`;
-
-            return ctx.reply(msg, {
-                parse_mode: 'Markdown',
-                ...Markup.inlineKeyboard([
-                    [Markup.button.callback('✅ Lanjut Bayar', `depo_${input}`)],
-                    [Markup.button.callback('❌ Batal', 'topup_menu')]
-                ])
-            });
-        }
-    } catch (e) {
-        console.error("ERROR TEXT HANDLER:", e.message);
-    }
-});
 // --- 4. RUN BOT ---
 bot.launch().then(() => {
   console.log('🚀 Bot Manzzy ID sudah online!');
