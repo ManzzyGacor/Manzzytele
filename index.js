@@ -180,7 +180,7 @@ bot.action(/^(list_services|svcpage_(.+))$/, async (ctx) => {
     } catch (e) { ctx.reply('❌ Gagal ambil layanan.'); }
 });
 
-// --- 2. PILIH NEGARA (PAGINATION TANPA HARGA LANGSUNG) ---
+// --- 2. STEP: PILIH NEGARA ---
 bot.action(/^(svc_(.+)|ctypage_(.+)_(.+))$/, async (ctx) => {
     const serviceId = ctx.match[2] || ctx.match[3]; 
     const page = ctx.match[4] ? parseInt(ctx.match[4]) : 0;
@@ -191,49 +191,48 @@ bot.action(/^(svc_(.+)|ctypage_(.+)_(.+))$/, async (ctx) => {
         
         const countries = res.data.data.map(c => ({
             text: `🌍 ${c.name}`,
-            // Kirim ke menu PILIH HARGA: svcId | numId | countryName
-            id: `selprice_${serviceId}_${c.number_id}_${c.name.replace(/ /g, '%20')}`
+            // Kirim ke: selprice_[svcId]_[numId]_[countryName]
+            id: `selp_${serviceId}_${c.number_id}_${c.name.replace(/ /g, '%20')}`
         }));
 
-        await ctx.editMessageCaption(`🌍 *Pilih Negara (Hal ${page + 1}):*`, {
+        await ctx.editMessageCaption(`🌍 *Pilih Negara:*`, {
             parse_mode: 'Markdown',
             ...createPagination(countries, `cty_${serviceId}`, page)
         });
     } catch (e) { ctx.reply('❌ Gagal memuat negara.'); }
 });
 
-// --- 3. MENU PILIH HARGA (DARI PRICELIST) ---
-bot.action(/^selprice_(.+)_(.+)_(.+)$/, async (ctx) => {
+// --- 3. STEP: PILIH HARGA (SERVER) ---
+bot.action(/^selp_(.+)_(.+)_(.+)$/, async (ctx) => {
     const [_, svcId, numId, countryName] = ctx.match;
     const cleanCountry = countryName.replace(/%20/g, ' ');
 
     try {
-        await ctx.answerCbQuery('Memuat Pricelist...');
+        await ctx.answerCbQuery('Memuat Server & Harga...');
         const res = await roApi.get(`/v2/countries?service_id=${svcId}`);
-        // Cari data negara yang diklik
         const countryData = res.data.data.find(c => c.number_id == numId);
         
-        if (!countryData || !countryData.pricelist) return ctx.reply('❌ Harga tidak ditemukan.');
+        if (!countryData || !countryData.pricelist) return ctx.reply('❌ Server tidak tersedia.');
 
         const buttons = countryData.pricelist.map(p => [
+            // Kirim ke: selop_[svcId]_[numId]_[provId]_[price]_[countryName]
             Markup.button.callback(
-                `💰 Server ${p.server_id} - ${p.price_format} (Stok: ${p.stock})`, 
-                `cty_${svcId}_${numId}_${p.provider_id}_${p.price}_${countryName}`
+                `💰 Server ${p.server_id} - ${p.price_format}`, 
+                `selo_${svcId}_${numId}_${p.provider_id}_${p.price}_${countryName}`
             )
         ]);
 
-        buttons.push([Markup.button.callback('⬅️ Ganti Negara', `svc_${svcId}`)]);
+        buttons.push([Markup.button.callback('⬅️ Kembali ke Negara', `svc_${svcId}`)]);
 
         await ctx.editMessageCaption(`💵 *Pilih Server/Harga untuk ${cleanCountry}:*`, {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard(buttons)
         });
-    } catch (e) { ctx.reply('❌ Gagal memuat daftar harga.'); }
+    } catch (e) { ctx.reply('❌ Gagal memuat harga.'); }
 });
 
-// --- 4. PILIH OPERATOR (DARI HARGA YANG DIPILIH) ---
-// Bagian ini tetap sama seperti sebelumnya, tapi sekarang data 'price' sudah pasti dari pilihan user
-bot.action(/^cty_(.+)_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
+// --- 4. STEP: PILIH OPERATOR ---
+bot.action(/^selo_(.+)_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
     const [_, svcId, numId, provId, price, countryName] = ctx.match;
     const cleanCountry = countryName.replace(/%20/g, ' ');
 
@@ -241,25 +240,24 @@ bot.action(/^cty_(.+)_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
         await ctx.answerCbQuery('Memuat Operator...');
         const res = await roApi.get(`/v2/operators?country=${countryName}&provider_id=${provId}`);
         
-        const textDetail = `🌍 Negara: *${cleanCountry}*\n💰 Harga: *Rp ${parseInt(price).toLocaleString('id-ID')}*`;
-
         let operators = res.data.data || [];
         if (operators.length === 0) operators = [{ id: 'any', name: 'Otomatis (Any)' }];
 
         const buttons = operators.map(op => [
-            Markup.button.callback(`📶 Op: ${op.name}`, `conf_${numId}_${provId}_${op.id}_${price}_${countryName}`)
+            // Kirim ke: conf_[numId]_[provId]_[opId]_[price]_[countryName]
+            Markup.button.callback(`📶 Operator: ${op.name}`, `conf_${numId}_${provId}_${op.id}_${price}_${countryName}`)
         ]);
 
-        buttons.push([Markup.button.callback('⬅️ Ganti Harga', `selprice_${svcId}_${numId}_${countryName}`)]);
+        buttons.push([Markup.button.callback('⬅️ Kembali ke Harga', `selp_${svcId}_${numId}_${countryName}`)]);
 
-        await ctx.editMessageCaption(`⚡ *Pilih Operator:*\n${textDetail}`, {
+        await ctx.editMessageCaption(`⚡ *Pilih Operator:*\n🌍 ${cleanCountry} | 💰 Rp ${parseInt(price).toLocaleString('id-ID')}`, {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard(buttons)
         });
     } catch (e) { ctx.reply('❌ Gagal memuat operator.'); }
 });
 
-// --- 4. HALAMAN KONFIRMASI (SEBELUM BELI) ---
+// --- 5. STEP: KONFIRMASI ---
 bot.action(/^conf_(.+)_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
     const [_, numId, provId, opId, price, countryName] = ctx.match;
     const cleanCountry = countryName.replace(/%20/g, ' ');
@@ -267,8 +265,8 @@ bot.action(/^conf_(.+)_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
     const msg = `🛒 *KONFIRMASI PESANAN*\n━━━━━━━━━━━━━━━━━━\n` +
                 `🌍 Negara: *${cleanCountry}*\n` +
                 `📶 Operator: *${opId.toUpperCase()}*\n` +
-                `💰 Biaya: *Rp ${parseInt(price).toLocaleString('id-ID')}*\n\n` +
-                `⚠️ _Saldo akan langsung terpotong setelah klik Beli Sekarang._`;
+                `💰 Biaya: *Rp ${parseInt(price).toLocaleString('id-ID')}*\n━━━━━━━━━━━━━━━━━━\n` +
+                `⚠️ _Klik tombol di bawah untuk memproses pembelian._`;
 
     await ctx.editMessageCaption(msg, {
         parse_mode: 'Markdown',
@@ -278,8 +276,7 @@ bot.action(/^conf_(.+)_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
         ])
     });
 });
-
-// --- 5. EKSEKUSI ORDER (FIX STUCK) ---
+// --- 6. EKSEKUSI ORDER (FIX STUCK) ---
 bot.action(/^exec_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
     // Kita pakai prefix 'op' di opId biar regex gak bingung
     const [_, numId, provId, opRaw, price] = ctx.match;
