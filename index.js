@@ -50,36 +50,55 @@ const checkJoin = async (ctx) => {
     }
 };
 
-// --- HANDLER START & MENU ---
-const sendMainMenu = async (ctx) => {
-    const isJoined = await checkJoin(ctx);
-
-    if (!isJoined) {
-        return ctx.reply(`👋 Halo ${ctx.from.first_name}!\n\nSebelum menggunakan bot **Manzzy ID**, kamu wajib bergabung di channel pusat kami terlebih dahulu.`, {
-            ...Markup.inlineKeyboard([
-                [Markup.button.url('📢 Join Channel', 'https://t.me/Manzzy_ID')], // Ganti link sesuai channelmu
-                [Markup.button.callback('✅ SAYA SUDAH JOIN', 'verify_join')]
-            ])
-        });
+// --- FUNGSI KEYBOARD UTAMA (Sesuai Tombol di SS kamu) ---
+const mainKeyboard = (isAdmin) => {
+    const btns = [
+        [Markup.button.callback('🛒 Beli Nomor (Nokos)', 'list_services')],
+        [Markup.button.callback('💰 Isi Saldo', 'topup_menu'), Markup.button.callback('👤 Profil', 'user_profile')],
+        [Markup.button.callback('📜 Riwayat', 'history'), Markup.button.callback('📞 Support', 'support_contact')]
+    ];
+    
+    // Munculkan tombol ini hanya jika ID-nya sama dengan OWNER_ID kamu
+    if (isAdmin) {
+        btns.push([Markup.button.callback('🛠️ Panel Owner', 'owner_panel')]);
     }
-
-    // Jika sudah join, tampilkan menu utama
-    const menuMsg = `🎯 *MAIN MENU MANZZY ID*\n\nSelamat datang kembali! Silakan pilih layanan di bawah ini:`;
-    await ctx.replyWithPhoto('https://raw.githubusercontent.com/ManzzyGacor/Urlmanzzy/main/file_1775385903372_357.jpg', { // Opsional: Tambah foto banner
-        caption: menuMsg,
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-            [Markup.button.callback('🛒 Beli Nomor (Nokos)', 'list_services')],
-            [Markup.button.callback('💰 Isi Saldo', 'topup_menu'), Markup.button.callback('👤 Profil', 'user_profile')],
-            [Markup.button.callback('📜 Riwayat', 'history'), Markup.button.callback('📞 Support', 'support_contact')]
-        ])
-    });
+    
+    return Markup.inlineKeyboard(btns);
 };
 
-// Command /start
-bot.start((ctx) => sendMainMenu(ctx));
+// --- HANDLER START & MENU ---
+const sendMainMenu = async (ctx) => {
+    try {
+        const isJoined = await checkJoin(ctx);
+        const isAdmin = ctx.from.id === OWNER_ID; // Pastikan OWNER_ID didefinisikan di awal file
 
-// Command /menu (Sekarang sudah bisa)
+        if (!isJoined) {
+            return ctx.reply(`👋 Halo ${ctx.from.first_name}!\n\nSebelum menggunakan bot **Manzzy ID**, kamu wajib bergabung di channel pusat kami terlebih dahulu.`, {
+                parse_mode: 'Markdown',
+                ...Markup.inlineKeyboard([
+                    [Markup.button.url('📢 Join Channel', 'https://t.me/Manzzy_ID')],
+                    [Markup.button.callback('✅ SAYA SUDAH JOIN', 'verify_join')]
+                ])
+            });
+        }
+
+        // TAMPILKAN MENU UTAMA DENGAN FOTO
+        const menuMsg = `🎯 *MAIN MENU MANZZY ID*\n\nSelamat datang kembali! Silakan pilih layanan di bawah ini:`;
+        
+        await ctx.replyWithPhoto('https://raw.githubusercontent.com/ManzzyGacor/Urlmanzzy/main/file_1775385903372_357.jpg', {
+            caption: menuMsg,
+            parse_mode: 'Markdown',
+            ...mainKeyboard(isAdmin) // Memanggil fungsi keyboard dinamis
+        });
+        
+    } catch (e) {
+        console.error("ERROR MENU:", e.message);
+        ctx.reply("❌ Terjadi gangguan saat memuat menu.");
+    }
+};
+
+// Command Hooks
+bot.start((ctx) => sendMainMenu(ctx));
 bot.command('menu', (ctx) => sendMainMenu(ctx));
 
 // --- HANDLER VERIFIKASI (DENGAN LOADING KEREN) ---
@@ -543,7 +562,35 @@ const sendTesti = async (data) => {
         console.error("Gagal kirim testi ke channel:", e.message);
     }
 };
+// --- HANDLER INPUT TEKS (UNTUK NOMINAL MANUAL) ---
+bot.on('text', async (ctx) => {
+    // Abaikan jika pesan diawali '/' (karena itu command seperti /start atau /menu)
+    if (ctx.message.text.startsWith('/')) return;
 
+    const input = parseInt(ctx.message.text.replace(/[^0-9]/g, '')); // Bersihkan dari titik atau huruf
+
+    // Validasi apakah input adalah angka
+    if (!isNaN(input)) {
+        // Cek Minimum Rp 2.000
+        if (input < 2000) {
+            return ctx.reply('⚠️ *Minimal Top Up adalah Rp 2.000*, Bre! Silakan masukkan nominal yang lebih besar.');
+        }
+
+        // Konfirmasi Nominal
+        const msg = `💳 *KONFIRMASI TOP UP*\n━━━━━━━━━━━━━━━━━━\n` +
+                    `💰 Nominal: *Rp ${input.toLocaleString('id-ID')}*\n` +
+                    `📝 Metode: *QRIS (Otomatis)*\n━━━━━━━━━━━━━━━━━━\n` +
+                    `Apakah data di atas sudah benar?`;
+
+        return ctx.reply(msg, {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+                [Markup.button.callback('✅ Lanjut Bayar', `depo_${input}`)],
+                [Markup.button.callback('❌ Batal', 'topup_menu')]
+            ])
+        });
+    }
+});
 
 // TOP UP SALDO
 // --- 1. MENU TOP UP ---
