@@ -235,43 +235,63 @@ bot.action(/^(svc_(.+)|svcpg_(.+)_(.+))$/, async (ctx) => {
     } catch (e) { ctx.reply('❌ Gagal memuat negara.'); }
 });
 
-// --- STEP 3: PILIH SERVER (TAMPILAN KOTAK S1, S2, dst) ---
+// --- STEP 3: PILIH SERVER (GRID S1, S2, dst) ---
 bot.action(/^spg_(.+)_(.+)$/, async (ctx) => {
-    const [_, svcId, numId] = ctx.match;
+    // svcId = ID Aplikasi (misal 13), numId = ID Negara
+    const svcId = ctx.match[1]; 
+    const numId = ctx.match[2];
+
     try {
-        await ctx.answerCbQuery();
+        await ctx.answerCbQuery('Memuat Server...');
+
+        // Ambil data dari API berdasarkan Service ID
         const res = await roApi.get(`/v2/countries?service_id=${svcId}`);
+        
+        // Cari negara (Gunakan == agar String vs Number tidak masalah)
         const country = res.data.data.find(c => c.number_id == numId);
         
-        if (!country) return ctx.reply('❌ Data tidak ditemukan.');
-
-        // Tombol Server S1, S2, S3... (Grid 3 Kolom)
-        const servers = country.pricelist.map((p, index) => ({
-            text: `💻 S${p.server_id || index + 1}`,
-            id: `${numId}_${p.provider_id}_${p.price}_${country.iso_code}`
-        }));
-
-        // Kita buat grid 3 kolom untuk server
-        const grid = [];
-        for (let i = 0; i < servers.length; i += 3) {
-            grid.push(servers.slice(i, i + 3).map(s => 
-                Markup.button.callback(s.text, `opr_${s.id}`)
-            ));
+        if (!country || !country.pricelist) {
+            console.log(`[DEBUG] Negara tidak ketemu. ID: ${numId}`);
+            return ctx.reply('❌ Maaf, data server untuk negara ini tidak ditemukan.');
         }
-        grid.push([Markup.button.callback('🔙 Kembali', `svc_${svcId}`), Markup.button.callback('🏠 Menu', 'start_menu')]);
+
+        // Susun Tombol Server (S1, S2, S3...) Grid 3 Kolom
+        const serverButtons = [];
+        const pricelist = country.pricelist;
+
+        for (let i = 0; i < pricelist.length; i += 3) {
+            const row = pricelist.slice(i, i + 3).map((p, idx) => {
+                // p.provider_id dan p.price dibawa ke tahap OPERATOR
+                return Markup.button.callback(
+                    `🖥️ S${i + idx + 1}`, 
+                    `opr_${numId}_${p.provider_id}_${p.price}_${country.iso_code}`
+                );
+            });
+            serverButtons.push(row);
+        }
+
+        // Navigasi Bawah
+        serverButtons.push([
+            Markup.button.callback('⬅️ Kembali', `svc_${svcId}`),
+            Markup.button.callback('🏠 Menu', 'start_menu')
+        ]);
 
         const caption = `*${country.prefix} PILIH SERVER - ${country.name.toUpperCase()}*\n\n` +
                         `Layanan: WhatsApp\n` +
                         `Negara: ${country.prefix} ${country.name}\n` +
                         `Stok: ${country.stock_total} nomor\n` +
-                        `Server: ${servers.length} tersedia\n\n` +
+                        `Server: ${pricelist.length} tersedia\n\n` +
                         `📋 *DAFTAR SERVER TERSEDIA*\nPilih server untuk melanjutkan:`;
 
         await ctx.editMessageCaption(caption, {
             parse_mode: 'Markdown',
-            ...Markup.inlineKeyboard(grid)
+            ...Markup.inlineKeyboard(serverButtons)
         });
-    } catch (e) { ctx.reply('❌ Gagal memuat server.'); }
+
+    } catch (e) {
+        console.error("ERROR STEP 3:", e.message);
+        ctx.reply('❌ Gagal memuat server. Pastikan koneksi stabil.');
+    }
 });
 // --- 4. STEP: PILIH OPERATOR ---
 bot.action(/^opr_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
