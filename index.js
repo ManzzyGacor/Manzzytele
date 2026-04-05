@@ -51,7 +51,7 @@ const checkJoin = async (ctx) => {
     }
 };
 
-// --- FUNGSI KEYBOARD UTAMA (Sesuai Tombol di SS kamu) ---
+// --- FUNGSI KEYBOARD UTAMA ---
 const mainKeyboard = (isAdmin) => {
     const btns = [
         [Markup.button.callback('🛒 Beli Nomor (Nokos)', 'list_services')],
@@ -59,7 +59,6 @@ const mainKeyboard = (isAdmin) => {
         [Markup.button.callback('📜 Riwayat', 'history'), Markup.button.callback('📞 Support', 'support_contact')]
     ];
     
-    // Munculkan tombol ini hanya jika ID-nya sama dengan OWNER_ID kamu
     if (isAdmin) {
         btns.push([Markup.button.callback('🛠️ Panel Owner', 'owner_panel')]);
     }
@@ -70,9 +69,24 @@ const mainKeyboard = (isAdmin) => {
 // --- HANDLER START & MENU ---
 const sendMainMenu = async (ctx) => {
     try {
-        const isJoined = await checkJoin(ctx);
-        const isAdmin = ctx.from.id === OWNER_ID; // Pastikan OWNER_ID didefinisikan di awal file
+        const userId = ctx.from.id;
+        
+        // 1. Ambil data user dari Database
+        let user = await User.findOne({ telegramId: userId });
 
+        // 2. Jika user baru (belum ada di DB), buatkan datanya
+        if (!user) {
+            user = await User.create({
+                telegramId: userId,
+                username: ctx.from.username || 'No Username',
+                saldo: 0,
+                role: 'Member', // Default Role
+                statusTopup: false
+            });
+        }
+
+        // 3. Cek Force Join Channel
+        const isJoined = await checkJoin(ctx);
         if (!isJoined) {
             return ctx.reply(`👋 Halo ${ctx.from.first_name}!\n\nSebelum menggunakan bot **Manzzy ID**, kamu wajib bergabung di channel pusat kami terlebih dahulu.`, {
                 parse_mode: 'Markdown',
@@ -83,21 +97,31 @@ const sendMainMenu = async (ctx) => {
             });
         }
 
-        // TAMPILKAN MENU UTAMA DENGAN FOTO
-        const menuMsg = `🎯 *MAIN MENU MANZZY ID*\n\nSelamat datang kembali! Silakan pilih layanan di bawah ini:`;
+        // 4. Susun Teks Menu dengan Data Profile
+        const isAdmin = userId === OWNER_ID;
+        const roleUser = isAdmin ? 'Owner / Admin' : (user.role || 'Member');
         
+        const menuMsg = `🎯 *MAIN MENU MANZZY ID*\n` +
+                        `━━━━━━━━━━━━━━━━━━\n` +
+                        `👤 *Nama:* ${ctx.from.first_name}\n` +
+                        `🆔 *ID:* \`${userId}\`\n` +
+                        `💳 *Saldo:* Rp ${user.saldo.toLocaleString('id-ID')}\n` +
+                        `🎖️ *Role:* ${roleUser}\n` +
+                        `━━━━━━━━━━━━━━━━━━\n` +
+                        `Silakan pilih layanan di bawah ini:`;
+
+        // Kirim Menu dengan Foto Banner
         await ctx.replyWithPhoto('https://raw.githubusercontent.com/ManzzyGacor/Urlmanzzy/main/file_1775385903372_357.jpg', {
             caption: menuMsg,
             parse_mode: 'Markdown',
-            ...mainKeyboard(isAdmin) // Memanggil fungsi keyboard dinamis
+            ...mainKeyboard(isAdmin)
         });
-        
+
     } catch (e) {
         console.error("ERROR MENU:", e.message);
         ctx.reply("❌ Terjadi gangguan saat memuat menu.");
     }
 };
-
 // Command Hooks
 bot.start((ctx) => sendMainMenu(ctx));
 bot.command('menu', (ctx) => sendMainMenu(ctx));
