@@ -17,7 +17,7 @@ const User = mongoose.model('User', new mongoose.Schema({
     firstName: String,
     saldo: { type: Number, default: 0 },
     role: { type: String, default: 'Member' },
-    isBanned: { type: Boolean, default: false }
+    isBanned: { type: Boolean, default: false },
     statusTopup: { type: Boolean, default: false } // Tambahkan ini
 }));
 
