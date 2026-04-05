@@ -18,6 +18,7 @@ const User = mongoose.model('User', new mongoose.Schema({
     saldo: { type: Number, default: 0 },
     role: { type: String, default: 'Member' },
     isBanned: { type: Boolean, default: false }
+    statusTopup: { type: Boolean, default: false } // Tambahkan ini
 }));
 
 
@@ -196,6 +197,7 @@ bot.on('text', async (ctx) => {
 
 // Menu Kembali
 bot.action('start_menu', async (ctx) => {
+    await User.findOneAndUpdate({ telegramId: ctx.from.id }, { statusTopup: false }); 
     const isOwner = ctx.from.id === OWNER_ID;
     const user = await User.findOne({ telegramId: ctx.from.id });
     await ctx.editMessageCaption(`👋 *Main Menu Manzzy ID*\n\n💰 Saldo: *${formatIDR(user.saldo)}*`, {
