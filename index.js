@@ -180,7 +180,7 @@ bot.action(/^(list_services|svcpage_(.+))$/, async (ctx) => {
     } catch (e) { ctx.reply('❌ Gagal ambil layanan.'); }
 });
 
-// --- 2. STEP: PILIH NEGARA (PAGINATION) ---
+// --- 2. STEP: PILIH NEGARA ---
 bot.action(/^(svc_(.+)|ctypage_(.+)_(.+))$/, async (ctx) => {
     const serviceId = ctx.match[2] || ctx.match[3];
     const page = ctx.match[4] ? parseInt(ctx.match[4]) : 0;
@@ -189,12 +189,14 @@ bot.action(/^(svc_(.+)|ctypage_(.+)_(.+))$/, async (ctx) => {
         await ctx.answerCbQuery('Memuat Negara...');
         const res = await roApi.get(`/v2/countries?service_id=${serviceId}`);
         
-        if (!res.data.success) return ctx.reply('❌ Gagal mengambil data negara dari pusat.');
+        if (!res.data.success || !res.data.data) {
+            return ctx.reply('❌ API RumahOTP tidak merespon data negara.');
+        }
 
+        // Mapping hanya Nama dan ID untuk tombol
         const countries = res.data.data.map(c => ({
             text: `🌍 ${c.name}`,
-            // Kirim ke: srv_[serviceId]_[numberId]
-            id: `srv_${serviceId}_${c.number_id}`
+            id: `srv_${serviceId}_${c.number_id}` // ID disingkat agar aman di Telegram
         }));
 
         await ctx.editMessageCaption(`🌍 *Pilih Negara (Hal ${page + 1}):*`, {
@@ -202,30 +204,35 @@ bot.action(/^(svc_(.+)|ctypage_(.+)_(.+))$/, async (ctx) => {
             ...createPagination(countries, `cty_${serviceId}`, page)
         });
     } catch (e) { 
-        console.error(e);
-        ctx.reply('❌ Terjadi kesalahan saat memuat negara.'); 
+        console.error("ERROR LIST NEGARA:", e.message);
+        ctx.reply('❌ Koneksi ke pusat lambat, coba lagi.'); 
     }
 });
 
-// --- 3. STEP: PILIH HARGA / SERVER (PENTING!) ---
+// --- 3. STEP: PILIH HARGA / SERVER (FIXED!) ---
 bot.action(/^srv_(.+)_(.+)$/, async (ctx) => {
     const [_, svcId, numId] = ctx.match;
     
     try {
-        await ctx.answerCbQuery('Memuat Daftar Harga...');
+        // Tampilkan loading di bar atas Telegram
+        await ctx.answerCbQuery('Memanggil Daftar Harga...');
         
-        // Kita panggil lagi API Countries untuk dapet isi pricelist-nya
+        // Ambil ulang data layanan tersebut
         const res = await roApi.get(`/v2/countries?service_id=${svcId}`);
+        
+        // CARI NEGARA BERDASARKAN number_id
+        // Gunakan == (double equals) karena numId dari callback itu String, di JSON bisa Number
         const country = res.data.data.find(c => c.number_id == numId);
         
-        if (!country || !country.pricelist) {
-            return ctx.reply('❌ Maaf, harga untuk negara ini sedang tidak tersedia.');
+        if (!country || !country.pricelist || country.pricelist.length === 0) {
+            console.log("DATA NEGARA TIDAK DITEMUKAN UNTUK ID:", numId);
+            return ctx.reply('❌ Maaf, harga/server untuk negara ini tidak ditemukan.');
         }
 
+        // BUAT TOMBOL HARGA DARI PRICELIST
         const buttons = country.pricelist.map(p => [
-            // Kirim ke: opr_[numId]_[provId]_[price]_[isoCode]
             Markup.button.callback(
-                `💰 Server ${p.server_id} - ${p.price_format}`, 
+                `💰 Server ${p.server_id} - ${p.price_format} (Stok: ${p.stock})`, 
                 `opr_${numId}_${p.provider_id}_${p.price}_${country.iso_code}`
             )
         ]);
@@ -236,8 +243,10 @@ bot.action(/^srv_(.+)_(.+)$/, async (ctx) => {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard(buttons)
         });
+
     } catch (e) { 
-        ctx.reply('❌ Gagal memuat daftar harga server.'); 
+        console.error("ERROR HARGA SERVER:", e.message);
+        ctx.reply('❌ Gagal memuat daftar harga. Cek koneksi VPS.'); 
     }
 });
 
