@@ -180,39 +180,60 @@ bot.action(/^(list_services|svcpage_(.+))$/, async (ctx) => {
     } catch (e) { ctx.reply('❌ Gagal ambil layanan.'); }
 });
 
-// --- 2. PILIH NEGARA & HARGA (PAGINATION) ---
+// --- 2. PILIH NEGARA (PAGINATION TANPA HARGA LANGSUNG) ---
 bot.action(/^(svc_(.+)|ctypage_(.+)_(.+))$/, async (ctx) => {
-    const serviceId = ctx.match[2] || ctx.match[3]; // Ini ID Aplikasi (misal: 13 untuk WA)
+    const serviceId = ctx.match[2] || ctx.match[3]; 
     const page = ctx.match[4] ? parseInt(ctx.match[4]) : 0;
 
     try {
-        await ctx.answerCbQuery('Mencari Negara...');
+        await ctx.answerCbQuery('Memuat Negara...');
         const res = await roApi.get(`/v2/countries?service_id=${serviceId}`);
         
-        if (!res.data.success) throw new Error('API Error');
+        const countries = res.data.data.map(c => ({
+            text: `🌍 ${c.name}`,
+            // Kirim ke menu PILIH HARGA: svcId | numId | countryName
+            id: `selprice_${serviceId}_${c.number_id}_${c.name.replace(/ /g, '%20')}`
+        }));
 
-        const countries = res.data.data.map(c => {
-            // Kita ambil pricelist pertama sebagai default
-            const p = c.pricelist[0]; 
-            return {
-                text: `🌍 ${c.name} (${p.price_format})`,
-                // DATA: svcId | numberId | providerId | price | countryName
-                id: `${serviceId}_${c.number_id}_${p.provider_id}_${p.price}_${c.name.replace(/ /g, '%20')}`
-            };
-        });
-
-        await ctx.editMessageCaption(`🌍 *Pilih Negara & Harga (Hal ${page + 1}):*`, {
+        await ctx.editMessageCaption(`🌍 *Pilih Negara (Hal ${page + 1}):*`, {
             parse_mode: 'Markdown',
             ...createPagination(countries, `cty_${serviceId}`, page)
         });
-    } catch (e) { 
-        ctx.reply('❌ Gagal memuat negara. Pastikan Service ID benar.'); 
-    }
+    } catch (e) { ctx.reply('❌ Gagal memuat negara.'); }
 });
 
-// --- 3. PILIH OPERATOR (URUTAN: NEGARA > HARGA > OPERATOR) ---
+// --- 3. MENU PILIH HARGA (DARI PRICELIST) ---
+bot.action(/^selprice_(.+)_(.+)_(.+)$/, async (ctx) => {
+    const [_, svcId, numId, countryName] = ctx.match;
+    const cleanCountry = countryName.replace(/%20/g, ' ');
+
+    try {
+        await ctx.answerCbQuery('Memuat Pricelist...');
+        const res = await roApi.get(`/v2/countries?service_id=${svcId}`);
+        // Cari data negara yang diklik
+        const countryData = res.data.data.find(c => c.number_id == numId);
+        
+        if (!countryData || !countryData.pricelist) return ctx.reply('❌ Harga tidak ditemukan.');
+
+        const buttons = countryData.pricelist.map(p => [
+            Markup.button.callback(
+                `💰 Server ${p.server_id} - ${p.price_format} (Stok: ${p.stock})`, 
+                `cty_${svcId}_${numId}_${p.provider_id}_${p.price}_${countryName}`
+            )
+        ]);
+
+        buttons.push([Markup.button.callback('⬅️ Ganti Negara', `svc_${svcId}`)]);
+
+        await ctx.editMessageCaption(`💵 *Pilih Server/Harga untuk ${cleanCountry}:*`, {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard(buttons)
+        });
+    } catch (e) { ctx.reply('❌ Gagal memuat daftar harga.'); }
+});
+
+// --- 4. PILIH OPERATOR (DARI HARGA YANG DIPILIH) ---
+// Bagian ini tetap sama seperti sebelumnya, tapi sekarang data 'price' sudah pasti dari pilihan user
 bot.action(/^cty_(.+)_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
-    // Format: cty_SVCID_NUMID_PROVID_PRICE_COUNTRYNAME
     const [_, svcId, numId, provId, price, countryName] = ctx.match;
     const cleanCountry = countryName.replace(/%20/g, ' ');
 
@@ -222,16 +243,14 @@ bot.action(/^cty_(.+)_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
         
         const textDetail = `🌍 Negara: *${cleanCountry}*\n💰 Harga: *Rp ${parseInt(price).toLocaleString('id-ID')}*`;
 
-        // Jika operator kosong, langsung kasih pilihan 'any'
         let operators = res.data.data || [];
         if (operators.length === 0) operators = [{ id: 'any', name: 'Otomatis (Any)' }];
 
         const buttons = operators.map(op => [
-            // PINDAH KE KONFIRMASI DULU (Belum potong saldo)
             Markup.button.callback(`📶 Op: ${op.name}`, `conf_${numId}_${provId}_${op.id}_${price}_${countryName}`)
         ]);
 
-        buttons.push([Markup.button.callback('⬅️ Ganti Negara', `svc_${svcId}`)]);
+        buttons.push([Markup.button.callback('⬅️ Ganti Harga', `selprice_${svcId}_${numId}_${countryName}`)]);
 
         await ctx.editMessageCaption(`⚡ *Pilih Operator:*\n${textDetail}`, {
             parse_mode: 'Markdown',
