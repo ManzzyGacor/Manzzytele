@@ -488,7 +488,7 @@ bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
             await ctx.reply(successMsg, {
                 parse_mode: 'Markdown',
                 ...Markup.inlineKeyboard([
-                    [Markup.button.callback('📩 CEK OTP', `status_${order.order_id}`)],
+[Markup.button.callback('📩 CEK OTP', `status_${order.order_id}_${price}`)]
                     [Markup.button.callback('❌ BATALKAN & REFUND', `cncl_${order.order_id}_${price}`)]
                 ])
             });
@@ -502,40 +502,65 @@ bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
         ctx.reply('❌ Sistem error saat memproses pesanan V2.');
     }
 });
-// step 7
-bot.action(/^status_(.+)$/, async (ctx) => {
-    const orderId = ctx.match[1];
+// --- 7. STEP: CEK STATUS OTP ---
+bot.action(/^status_(.+)_(.+)$/, async (ctx) => {
+    // Kita tangkap orderId dan price (buat jaga-jaga kalau mau batal)
+    const [_, orderId, price] = ctx.match; 
+    
     try {
-        const res = await roApi.get(`/v1/orders/get_status?order_id=${orderId}`);
+        // Gunakan v2 untuk cek status agar lebih akurat sesuai dokumentasi
+        const res = await roApi.get(`/v2/orders/status?order_id=${orderId}`);
         const data = res.data.data;
 
         if (data.otp_code) {
-            // KIRIM TESTI KE CHANNEL (Hanya jika kodenya ada)
-            // Kita bungkus biar nggak dobel kirim kalau user klik 'Cek OTP' berkali-kali
-            // (Opsional: Kamu bisa simpan di DB kalau sudah pernah dikirim, tapi ini versi simpelnya)
-            
-            const msg = `📩 *OTP DITERIMA!*\n\n🔢 Kode: \`${data.otp_code}\`\n📝 Pesan: \`${data.otp_msg}\``;
+            // --- 1. JIKA OTP MASUK ---
+            const msg = `📩 *OTP DITERIMA!*\n━━━━━━━━━━━━━━━━━━\n` +
+                        `🔢 Kode: \`${data.otp_code}\`\n` +
+                        `📝 Pesan: \`${data.otp_msg}\`\n━━━━━━━━━━━━━━━━━━\n` +
+                        `✅ _Order selesai otomatis jika OTP sudah digunakan._`;
 
-            await ctx.reply(msg, { 
+            await ctx.editMessageText(msg, { 
                 parse_mode: 'Markdown',
                 ...Markup.inlineKeyboard([
                     [Markup.button.callback('✅ SELESAIKAN ORDER', `done_${orderId}`)]
                 ])
             });
 
-            // Kirim ke Channel
+            // Kirim Testi ke Channel
             await sendTesti({
                 username: ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name,
                 service: data.service,
                 country: data.country,
-                price: data.price || 0, // Pastikan field ini ada di res API atau ambil dari context
+                price: parseInt(price) || 0,
                 orderId: orderId
             });
 
         } else {
-            await ctx.answerCbQuery('📭 Belum ada OTP masuk.', { show_alert: true });
+            // --- 2. JIKA OTP BELUM MASUK ---
+            // Kita update jam terakhir cek biar user tahu botnya kerja
+            const timeNow = new Date().toLocaleTimeString('id-ID');
+            
+            await ctx.answerCbQuery('📭 Belum ada OTP masuk.', { show_alert: false });
+
+            const refreshMsg = `⏳ *MENUNGGU OTP...*\n━━━━━━━━━━━━━━━━━━\n` +
+                               `📞 Nomor: \`${data.phone_number}\`\n` +
+                               `🆔 Order ID: \`${orderId}\`\n` +
+                               `🕒 Terakhir Cek: *${timeNow}*\n━━━━━━━━━━━━━━━━━━\n` +
+                               `ℹ️ _OTP biasanya masuk dalam 1-5 menit._`;
+
+            // Update pesan dan TETAP munculkan tombol Batal & Refund
+            await ctx.editMessageText(refreshMsg, {
+                parse_mode: 'Markdown',
+                ...Markup.inlineKeyboard([
+                    [Markup.button.callback('🔄 REFRESH / CEK OTP', `status_${orderId}_${price}`)],
+                    [Markup.button.callback('❌ BATALKAN & REFUND', `cncl_${orderId}_${price}`)]
+                ])
+            });
         }
-    } catch (e) { ctx.answerCbQuery('Gagal cek status.'); }
+    } catch (e) { 
+        console.error("ERROR CHECK OTP:", e.message);
+        ctx.answerCbQuery('❌ Gagal cek status API.'); 
+    }
 });
 // --- 9. STEP: SELESAIKAN ORDER (BARU KONFIRMASI) ---
 bot.action(/^done_(.+)$/, async (ctx) => {
