@@ -40,20 +40,34 @@ const mainKeyboard = (isAdmin) => {
 // --- LOGIKA UTAMA ---
 
 bot.start(async (ctx) => {
-    const isOwner = ctx.from.id === OWNER_ID;
-    let user = await User.findOneAndUpdate(
-        { telegramId: ctx.from.id },
-        { username: ctx.from.username, firstName: ctx.from.first_name, role: isOwner ? 'Owner' : 'Member' },
-        { upsert: true, new: true }
-    );
+    try {
+        const isOwner = ctx.from.id === OWNER_ID;
+        let user = await User.findOneAndUpdate(
+            { telegramId: ctx.from.id },
+            { username: ctx.from.username, firstName: ctx.from.first_name },
+            { upsert: true, new: true }
+        );
 
-    await ctx.replyWithPhoto('https://telegra.ph/file/your-image.jpg', {
-        caption: `👋 *Halo ${ctx.from.first_name}!*\nSelamat datang di *Manzzy ID*.\n\n💰 Saldo: *${formatIDR(user.saldo)}*\n🆔 ID: \`${ctx.from.id}\``,
-        parse_mode: 'Markdown',
-        ...mainKeyboard(isOwner)
-    });
+        const caption = `👋 *Halo ${ctx.from.first_name}!*\nSelamat datang di *Manzzy ID*.\n\n💰 Saldo: *${formatIDR(user.saldo)}*`;
+
+        // Gunakan TRY CATCH khusus untuk foto
+        try {
+            await ctx.replyWithPhoto('https://raw.githubusercontent.com/ManzzyGacor/Urlmanzzy/main/file_1775385903372_357.jpg', {
+                caption: caption,
+                parse_mode: 'Markdown',
+                ...mainKeyboard(isOwner)
+            });
+        } catch (photoError) {
+            // Kalau foto gagal, kirim teks aja biar bot nggak mati
+            await ctx.reply(caption, {
+                parse_mode: 'Markdown',
+                ...mainKeyboard(isOwner)
+            });
+        }
+    } catch (err) {
+        console.error("ERROR START:", err);
+    }
 });
-
 // --- FITUR OWNER (ADD SALDO) ---
 // Perintah: /addsaldo [ID] [Jumlah]
 bot.command('addsaldo', async (ctx) => {
