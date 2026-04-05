@@ -210,85 +210,105 @@ bot.action(/^(svc_(.+)|ctypage_(.+)_(.+))$/, async (ctx) => {
     }
 });
 
-// --- 3. PILIH OPERATOR (MENGGUNAKAN NAME & PROVIDER_ID) ---
-bot.action(/^cty_(.+)_(.+)_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
+// --- 3. PILIH OPERATOR (URUTAN: NEGARA > HARGA > OPERATOR) ---
+bot.action(/^cty_(.+)_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
     // Format: cty_SVCID_NUMID_PROVID_PRICE_COUNTRYNAME
     const [_, svcId, numId, provId, price, countryName] = ctx.match;
-    
+    const cleanCountry = countryName.replace(/%20/g, ' ');
+
     try {
         await ctx.answerCbQuery('Memuat Operator...');
+        const res = await roApi.get(`/v2/operators?country=${countryName}&provider_id=${provId}`);
         
-        // Memanggil operator berdasarkan Nama Negara dan Provider ID sesuai dokumentasi
-        const url = `/v2/operators?country=${countryName}&provider_id=${provId}`;
-        const res = await roApi.get(url);
-        
-        const textDetail = `🌍 Negara: *${countryName.replace(/%20/g, ' ')}*\n💰 Harga: *Rp ${parseInt(price).toLocaleString('id-ID')}*`;
+        const textDetail = `🌍 Negara: *${cleanCountry}*\n💰 Harga: *Rp ${parseInt(price).toLocaleString('id-ID')}*`;
 
-        if (!res.data.success || !res.data.data || res.data.data.length === 0) {
-            // Jika list operator kosong, arahkan ke 'any'
-            return ctx.editMessageCaption(`${textDetail}\n\n⚠️ Operator spesifik kosong. Gunakan otomatis?`, {
-                parse_mode: 'Markdown',
-                ...Markup.inlineKeyboard([
-                    [Markup.button.callback('✅ Ya, Pakai Any', `order_${numId}_${provId}_any_${price}`)],
-                    [Markup.button.callback('⬅️ Ganti Negara', `svc_${svcId}`)]
-                ])
-            });
-        }
+        // Jika operator kosong, langsung kasih pilihan 'any'
+        let operators = res.data.data || [];
+        if (operators.length === 0) operators = [{ id: 'any', name: 'Otomatis (Any)' }];
 
-        const buttons = res.data.data.map(op => [
-            // Kirim numId (dari negara) bukan svcId ke proses order!
-            Markup.button.callback(`📶 Op: ${op.name}`, `order_${numId}_${provId}_${op.id}_${price}`)
+        const buttons = operators.map(op => [
+            // PINDAH KE KONFIRMASI DULU (Belum potong saldo)
+            Markup.button.callback(`📶 Op: ${op.name}`, `conf_${numId}_${provId}_${op.id}_${price}_${countryName}`)
         ]);
 
-        buttons.push([Markup.button.callback('⬅️ Kembali', `svc_${svcId}`)]);
+        buttons.push([Markup.button.callback('⬅️ Ganti Negara', `svc_${svcId}`)]);
 
         await ctx.editMessageCaption(`⚡ *Pilih Operator:*\n${textDetail}`, {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard(buttons)
         });
-    } catch (e) { 
-        ctx.reply('❌ Gagal memuat operator.'); 
-    }
+    } catch (e) { ctx.reply('❌ Gagal memuat operator.'); }
 });
-// STEP 4: Proses Order (Potong Saldo & Hit API)
-bot.action(/^order_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
-    const [_, numId, provId, opId, price] = ctx.match;
+
+// --- 4. HALAMAN KONFIRMASI (SEBELUM BELI) ---
+bot.action(/^conf_(.+)_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
+    const [_, numId, provId, opId, price, countryName] = ctx.match;
+    const cleanCountry = countryName.replace(/%20/g, ' ');
+
+    const msg = `🛒 *KONFIRMASI PESANAN*\n━━━━━━━━━━━━━━━━━━\n` +
+                `🌍 Negara: *${cleanCountry}*\n` +
+                `📶 Operator: *${opId.toUpperCase()}*\n` +
+                `💰 Biaya: *Rp ${parseInt(price).toLocaleString('id-ID')}*\n\n` +
+                `⚠️ _Saldo akan langsung terpotong setelah klik Beli Sekarang._`;
+
+    await ctx.editMessageCaption(msg, {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+            [Markup.button.callback('✅ BELI SEKARANG', `exec_${numId}_${provId}_op${opId}_${price}`)],
+            [Markup.button.callback('❌ BATAL', 'start_menu')]
+        ])
+    });
+});
+
+// --- 5. EKSEKUSI ORDER (FIX STUCK) ---
+bot.action(/^exec_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
+    // Kita pakai prefix 'op' di opId biar regex gak bingung
+    const [_, numId, provId, opRaw, price] = ctx.match;
+    const opId = opRaw.replace('op', ''); 
     const userId = ctx.from.id;
 
     try {
-        // Cek Saldo Internal User
-        const user = await User.findOne({ telegramId: userId });
-        if (user.saldo < parseInt(price)) return ctx.answerCbQuery('❌ Saldo tidak cukup!', { show_alert: true });
-
-        await ctx.editMessageCaption('⏳ Sedang memproses pesanan...');
+        await ctx.answerCbQuery('Memproses pesanan...');
         
-        // Hit API Order RumahOTP
+        // 1. Cek Saldo User di DB Manzzy ID
+        const user = await User.findOne({ telegramId: userId });
+        if (!user || user.saldo < parseInt(price)) {
+            return ctx.reply('❌ Saldo Manzzy ID Anda tidak cukup! Silakan isi saldo terlebih dahulu.');
+        }
+
+        // 2. Tembak API RumahOTP (PASTIKAN PARAMETER BENAR)
+        // URL: /v2/orders?number_id=ID&provider_id=ID&operator_id=ID
         const orderRes = await roApi.get(`/v2/orders?number_id=${numId}&provider_id=${provId}&operator_id=${opId}`);
         
         if (orderRes.data.success) {
             const order = orderRes.data.data;
             
-            // Potong Saldo
+            // 3. POTONG SALDO (Hanya jika API Sukses)
             user.saldo -= parseInt(price);
             await user.save();
 
-            const orderMsg = `✅ *Pesanan Berhasil!*\n\n` +
-                             `📱 Layanan: *${order.service}*\n` +
+            const orderMsg = `✅ *NOMOR BERHASIL DIDAPATKAN!*\n━━━━━━━━━━━━━━━━━━\n` +
                              `📞 Nomor: \`${order.phone_number}\`\n` +
-                             `🆔 Order ID: \`${order.order_id}\`\n\n` +
-                             `🕒 _Silakan tunggu OTP masuk..._`;
+                             `🆔 Order ID: \`${order.order_id}\`\n` +
+                             `💰 Harga: Rp ${order.price}\n\n` +
+                             `🕒 _Silakan gunakan nomor tersebut. Klik tombol di bawah untuk cek OTP._`;
 
             await ctx.reply(orderMsg, {
                 parse_mode: 'Markdown',
                 ...Markup.inlineKeyboard([
-                    [Markup.button.callback('📩 Cek OTP', `status_${order.order_id}`)],
-                    [Markup.button.callback('❌ Batalkan', `cancel_${order.order_id}`)]
+                    [Markup.button.callback('📩 CEK OTP', `status_${order.order_id}`)],
+                    [Markup.button.callback('❌ CANCEL & REFUND', `cancel_${order.order_id}_${price}`)]
                 ])
             });
+        } else {
+            // Jika sukses: false dari API (stok habis dll)
+            ctx.reply(`❌ Gagal: ${orderRes.data.message || 'Stok habis atau gangguan server.'}`);
         }
-    } catch (e) { ctx.reply('❌ Gagal Order: ' + (e.response?.data?.message || e.message)); }
+    } catch (e) {
+        console.error("ERROR EXEC ORDER:", e.response?.data || e.message);
+        ctx.reply('❌ Terjadi kesalahan sistem saat menghubungi provider.');
+    }
 });
-
 // STEP 5: Cek Status OTP
 bot.action(/^status_(.+)$/, async (ctx) => {
     const orderId = ctx.match[1];
