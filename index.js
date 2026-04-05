@@ -25,26 +25,23 @@ const BANNER_URL = 'https://telegra.ph/file/your-image-id.jpg'; // Ganti dengan 
 // --- 3. LOGIKA BOT ---
 
 bot.start(async (ctx) => {
-  const from = ctx.from;
+  try {
+    const from = ctx.from;
 
-  // Cek/Simpan User ke Database
-  let user = await User.findOne({ telegramId: from.id });
-  if (!user) {
-    // Jika username adalah 'man', otomatis jadi admin (sesuai request kamu sebelumnya)
-    const assignedRole = from.username === 'man' ? 'Admin' : 'Member';
-    
-    user = await User.create({
-      telegramId: from.id,
-      username: from.username,
-      role: assignedRole
-    });
-  }
+    // Cek/Simpan User ke Database
+    let user = await User.findOne({ telegramId: from.id });
+    if (!user) {
+      const assignedRole = from.username === 'man' ? 'Admin' : 'Member';
+      user = await User.create({
+        telegramId: from.id,
+        username: from.username,
+        role: assignedRole
+      });
+    }
 
-  const welcomeMsg = `
-👋 *Selamat Datang di Manzzy ID*
+    const welcomeMsg = `👋 *Selamat Datang di Manzzy ID*
 ━━━━━━━━━━━━━━━━━━
 Layanan penyedia *Nokos Virtual* terpercaya.
-Dapatkan nomor virtual untuk berbagai kebutuhan sosial media Anda.
 
 👤 *User:* ${from.first_name}
 🆔 *ID Anda:* \`${from.id}\`
@@ -52,23 +49,36 @@ Dapatkan nomor virtual untuk berbagai kebutuhan sosial media Anda.
 🛡️ *Role:* ${user.role}
 
 Owner: @Manjikeduwa
-━━━━━━━━━━━━━━━━━━
-Silahkan pilih menu di bawah:`;
+━━━━━━━━━━━━━━━━━━`;
 
-  await ctx.replyWithPhoto(BANNER_URL, {
-    caption: welcomeMsg,
-    parse_mode: 'Markdown',
-    ...Markup.inlineKeyboard([
+    const keyboard = Markup.inlineKeyboard([
       [
         Markup.button.callback('🛍️ Beli Nokos', 'buy_nokos'),
         Markup.button.callback('💰 Isi Saldo', 'deposit')
       ],
       [
-        Markup.button.url('👨‍💻 Hubungi Admin', 'https://t.me/Manjikeduwa'),
-        Markup.button.callback('⚙️ Menu Lain', 'other_menu')
+        Markup.button.url('👨‍💻 Hubungi Admin', 'https://t.me/Manjikeduwa')
       ]
-    ])
-  });
+    ]);
+
+    // Coba kirim foto dulu, kalau gagal kirim teks aja
+    try {
+      await ctx.replyWithPhoto(BANNER_URL, {
+        caption: welcomeMsg,
+        parse_mode: 'Markdown',
+        ...keyboard
+      });
+    } catch (photoError) {
+      console.error('Gagal kirim foto, mengirim teks saja:', photoError.description);
+      await ctx.reply(welcomeMsg, {
+        parse_mode: 'Markdown',
+        ...keyboard
+      });
+    }
+
+  } catch (err) {
+    console.error('Error di Command Start:', err);
+  }
 });
 
 // Handler Tombol (Contoh sederhana)
