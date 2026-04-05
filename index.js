@@ -364,18 +364,15 @@ const serverButtons = [];
 
 for (let i = 0; i < list.length; i += 3) {
             const row = list.slice(i, i + 3).map((p, idx) => {
-                // 1. Hitung harga jual
                 const price = Math.ceil((p.price + (p.price * PROFIT_PERCENT / 100)) / 100) * 100;
                 
-                // 2. AMBIL ID ASLI: p.operator_id (biasanya isinya 'any' atau nama provider)
-                // Jangan pakai "S1" buat dikirim ke API, itu cuma buat label tombol aja
-                const realOpId = p.operator_id || 'any'; 
-                const label = `S${i + idx + 1}`;
+                // AMBIL ID NYA (ANGKA), BUKAN NAMANYA
+                // Jika p.operator_id isinya teks, pastikan dari API dapet ID angkanya.
+                // Kalau di pricelist ga ada ID angka, default ke 1 (any)
+                const realOpId = p.operator_id_number || 1; 
 
-                // 3. KIRIM KE KONFIRMASI (Step 5)
-                // Urutan: cf_numId_provId_opId_price
                 return Markup.button.callback(
-                    `🖥️ ${label} - Rp${price.toLocaleString('id-ID')}`, 
+                    `🖥️ S${i + idx + 1} - Rp${price.toLocaleString('id-ID')}`, 
                     `cf_${numId}_${p.provider_id}_${realOpId}_${price}`
                 );
             });
