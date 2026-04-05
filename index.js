@@ -438,56 +438,55 @@ bot.action(/^cf_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
     });
 });
 
-// --- 6. STEP: EKSEKUSI ORDER ---
+// --- 6. STEP: BELI NOMOR (EKSEKUSI) ---
 bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
-    // Urutan: 1.numId, 2.provId, 3.priceJual, 4.iso
-    const [_, numId, provId, priceJual, iso] = ctx.match; 
-    
+    // Pastikan urutan variabel ini pas dengan yang dikirim tombol Step 3
+    const [_, numId, provId, price, iso] = ctx.match; 
     const userId = ctx.from.id;
-    const user = await User.findOne({ telegramId: userId });
 
-   
     try {
-        await ctx.answerCbQuery('⏳ Memproses...', { show_alert: false });
-
         const user = await User.findOne({ telegramId: userId });
+
+        // 1. CEK SALDO (Ganti 'price' jadi 'price')
         if (!user || user.saldo < parseInt(price)) {
-            return ctx.reply('❌ Saldo Anda tidak cukup!');
+            return ctx.answerCbQuery(`❌ Saldo kurang! Butuh Rp ${parseInt(price).toLocaleString('id-ID')}`, { show_alert: true });
         }
 
-        const url = `/v2/orders?number_id=${numId}&provider_id=${provId}&operator_id=${opId}`;
-        const orderRes = await roApi.get(url);
-        
-if (orderRes.data && orderRes.data.success === true) {
+        await ctx.answerCbQuery('Memproses pesanan...');
+
+        // 2. ORDER KE RUMAOTP
+        const orderRes = await roApi.get(`/v1/orders/create?number_id=${numId}&provider_id=${provId}`);
+
+        if (orderRes.data && orderRes.data.success === true) {
             const order = orderRes.data.data;
             
-            user.saldo -= parseInt(priceJual);
-    await user.save();
+            // 3. POTONG SALDO (Ganti 'price' jadi 'price')
+            user.saldo -= parseInt(price);
+            await user.save();
 
             const successMsg = `✅ *NOMOR BERHASIL DIDAPATKAN!*\n━━━━━━━━━━━━━━━━━━\n` +
                                `📱 Layanan: *${order.service}*\n` +
                                `📞 Nomor: \`${order.phone_number}\`\n` +
                                `🆔 Order ID: \`${order.order_id}\`\n` +
                                `💰 Harga: Rp ${parseInt(price).toLocaleString('id-ID')}\n━━━━━━━━━━━━━━━━━━\n` +
-                               `🕒 _Silakan gunakan nomor tersebut. Jika OTP masuk, klik tombol di bawah._`;
+                               `🕒 _Gunakan nomor. Jika OTP masuk, klik tombol CEK OTP._`;
 
             await ctx.reply(successMsg, {
                 parse_mode: 'Markdown',
                 ...Markup.inlineKeyboard([
                     [Markup.button.callback('📩 CEK OTP', `status_${order.order_id}`)],
+                    // Tombol batal juga harus pakai price biar refund-nya bener
                     [Markup.button.callback('❌ BATALKAN & REFUND', `cncl_${order.order_id}_${price}`)]
                 ])
             });
         } else {
-            // JIKA GAGAL: Cek apakah ada message dari API, jika tidak tampilkan teks default
-            const alasanGagal = orderRes.data?.message || "Stok sedang kosong atau server provider gangguan.";
+            const alasanGagal = orderRes.data?.message || "Stok habis atau server gangguan.";
             ctx.reply(`❌ Gagal: ${alasanGagal}`);
         }
     } catch (e) {
-        // Cek error dari axios response jika ada
-        const errorDetail = e.response?.data?.message || "Terjadi gangguan koneksi ke server provider.";
+        // Ganti 'price' di log atau reply jika ada
         console.error("ERROR EXEC ORDER:", e.message);
-        ctx.reply(`❌ Gagal: ${errorDetail}`);
+        ctx.reply('❌ Sistem error saat eksekusi pembelian.');
     }
 });
 
