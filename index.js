@@ -568,19 +568,45 @@ const sendTesti = async (data) => {
 // TOP UP SALDO
 // --- 1. MENU TOP UP ---
 bot.action('topup_menu', async (ctx) => {
-    const msg = `💳 *TOP UP SALDO - MANZZY ID*\n\n` +
-                `Metode: *QRIS Otomatis*\n` +
-                `Minimal: *Rp 2.000*\n\n` +
-                `Silakan pilih nominal atau ketik jumlah saldo:`;
+    const userId = ctx.from.id;
     
-    await ctx.editMessageCaption(msg, {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-            [Markup.button.callback('Rp 10.000', 'depo_10000'), Markup.button.callback('Rp 20.000', 'depo_20000')],
-            [Markup.button.callback('Rp 50.000', 'depo_50000'), Markup.button.callback('Rp 100.000', 'depo_100000')],
-            [Markup.button.callback('🏠 Menu Utama', 'start_menu')]
-        ])
-    });
+    try {
+        // Aktifkan mode input teks di DB
+        await User.findOneAndUpdate({ telegramId: userId }, { statusTopup: true });
+
+        const msg = `💳 *TOP UP SALDO - MANZZY ID*\n\n` +
+                    `Metode: *QRIS Otomatis*\n` +
+                    `Minimal: *Rp 2.000*\n\n` +
+                    `📝 *Cara Top Up:*\n` +
+                    `• Pilih tombol nominal di bawah\n` +
+                    `• Atau *Ketik Langsung* nominalnya\n` +
+                    `  _(Contoh: ketik 15000)_`;
+        
+        await ctx.editMessageCaption(msg, {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+                [
+                    Markup.button.callback('Rp 5.000', 'depo_5000'), 
+                    Markup.button.callback('Rp 10.000', 'depo_10000'),
+                    Markup.button.callback('Rp 15.000', 'depo_15000')
+                ],
+                [
+                    Markup.button.callback('Rp 20.000', 'depo_20000'),
+                    Markup.button.callback('Rp 25.000', 'depo_25000'),
+                    Markup.button.callback('Rp 30.000', 'depo_30000')
+                ],
+                [
+                    Markup.button.callback('Rp 50.000', 'depo_50000'),
+                    Markup.button.callback('Rp 75.000', 'depo_75000'),
+                    Markup.button.callback('Rp 100.000', 'depo_100000')
+                ],
+                [Markup.button.callback('🏠 Menu Utama', 'start_menu')]
+            ])
+        });
+    } catch (e) {
+        console.error("ERROR TOUPUP MENU:", e.message);
+        ctx.answerCbQuery('❌ Gagal memuat menu top up.');
+    }
 });
 
 // --- 2. GENERATE QRIS ---
