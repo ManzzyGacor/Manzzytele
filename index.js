@@ -444,39 +444,39 @@ bot.action(/^cf_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
     });
 });
 
-// --- 6. STEP: BELI NOMOR (EKSEKUSI) ---
-// Regex ini harus punya 4 kelompok (.+) setelah buy_
+// --- 6. STEP: BELI NOMOR (EKSEKUSI API V2) ---
 bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
-    // KITA TANGKAP 4 DATA: [1]numId, [2]provId, [3]opId, [4]price
+    // [1]numId, [2]provId, [3]opId, [4]price
     const [_, numId, provId, opId, price] = ctx.match; 
     const userId = ctx.from.id;
 
     try {
         const user = await User.findOne({ telegramId: userId });
 
-        // CEK SALDO (Sekarang 'price' sudah pasti berisi angka dari urutan ke-4)
+        // 1. Cek Saldo
         if (!user || user.saldo < parseInt(price)) {
             return ctx.answerCbQuery(`❌ Saldo kurang! Butuh Rp ${parseInt(price).toLocaleString('id-ID')}`, { show_alert: true });
         }
 
-        await ctx.answerCbQuery('Memproses pesanan...');
+        await ctx.answerCbQuery('🚀 Memproses Order Nomor...');
 
-        // ORDER KE RUMAOTP
-        const orderRes = await roApi.get(`/v1/orders/create?number_id=${numId}&provider_id=${provId}`);
+        // 2. PANGGIL API V2 (Sesuai Dokumentasi Kamu)
+        // Format: /v2/orders?number_id=...&provider_id=...&operator_id=...
+        const orderRes = await roApi.get(`/v2/orders?number_id=${numId}&provider_id=${provId}&operator_id=${opId}`);
 
         if (orderRes.data && orderRes.data.success === true) {
             const order = orderRes.data.data;
             
-            // POTONG SALDO
+            // 3. Potong Saldo (Gunakan harga yang sudah ada profitnya)
             user.saldo -= parseInt(price);
             await user.save();
 
-            const successMsg = `✅ *NOMOR BERHASIL DIDAPATKAN!*\n━━━━━━━━━━━━━━━━━━\n` +
+            const successMsg = `✅ *NOMOR BERHASIL DIDAPATKAN*\n━━━━━━━━━━━━━━━━━━\n` +
                                `📱 Layanan: *${order.service}*\n` +
                                `📞 Nomor: \`${order.phone_number}\`\n` +
                                `🆔 Order ID: \`${order.order_id}\`\n` +
                                `💰 Harga: Rp ${parseInt(price).toLocaleString('id-ID')}\n━━━━━━━━━━━━━━━━━━\n` +
-                               `🕒 _Gunakan nomor. Jika OTP masuk, klik tombol CEK OTP._`;
+                               `🕒 _Silakan gunakan nomornya dan tunggu OTP._`;
 
             await ctx.reply(successMsg, {
                 parse_mode: 'Markdown',
@@ -486,12 +486,13 @@ bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
                 ])
             });
         } else {
-            const alasanGagal = orderRes.data?.message || "Stok habis atau server gangguan.";
-            ctx.reply(`❌ Gagal: ${alasanGagal}`);
+            // Jika sukses: false, tampilkan pesan error dari API
+            const errorMsg = orderRes.data?.message || "Terjadi kesalahan pada API RumahOTP.";
+            ctx.reply(`❌ Gagal Order: ${errorMsg}`);
         }
     } catch (e) {
-        console.error("ERROR EXEC ORDER:", e.message);
-        ctx.reply('❌ Sistem error saat eksekusi pembelian.');
+        console.error("ERROR EXEC ORDER V2:", e.message);
+        ctx.reply('❌ Sistem error saat memproses pesanan V2.');
     }
 });
 // step 7
