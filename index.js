@@ -146,7 +146,7 @@ bot.action('verify_join', async (ctx) => {
             await ctx.editMessageText(`❌ *Verifikasi Gagal!*\n\nKamu benar-benar harus join channel dulu sebelum bisa lanjut, Bre.`, {
                 parse_mode: 'Markdown',
                 ...Markup.inlineKeyboard([
-                    [Markup.button.url('📢 Join Channel', 'https://t.me/Manzzy_ID')],
+                    [Markup.button.url('📢 Join Channel', 'https://t.me/manzzyidnokos')],
                     [Markup.button.callback('🔄 COBA LAGI', 'verify_join')]
                 ])
             });
