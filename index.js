@@ -180,23 +180,7 @@ bot.action(/^(list_services|svcpage_(.+))$/, async (ctx) => {
     } catch (e) { ctx.reply('❌ Gagal ambil layanan.'); }
 });
 
-// --- 2. STEP: PILIH NEGARA ---
-bot.action(/^(list_services|svcpage_(.+))$/, async (ctx) => {
-    try {
-        const page = ctx.match[2] ? parseInt(ctx.match[2]) : 0;
-        await ctx.answerCbQuery();
-        
-        const res = await roApi.get('/v2/services');
-        const services = res.data.data.map(s => ({ text: s.service_name, id: s.service_code }));
-
-        await ctx.editMessageCaption('📱 *Pilih Layanan:*', {
-            parse_mode: 'Markdown',
-            ...createPagination(services, 'svc', page)
-        });
-    } catch (e) { ctx.reply('❌ Gagal ambil layanan.'); }
-});
-
-// --- 3. STEP: PILIH NEGARA (Setelah Pilih Layanan) ---
+// --- 2. STEP: PILIH NEGARA (PAGINATION) ---
 bot.action(/^(svc_(.+)|ctypage_(.+)_(.+))$/, async (ctx) => {
     const serviceId = ctx.match[2] || ctx.match[3];
     const page = ctx.match[4] ? parseInt(ctx.match[4]) : 0;
@@ -205,79 +189,94 @@ bot.action(/^(svc_(.+)|ctypage_(.+)_(.+))$/, async (ctx) => {
         await ctx.answerCbQuery('Memuat Negara...');
         const res = await roApi.get(`/v2/countries?service_id=${serviceId}`);
         
+        if (!res.data.success) return ctx.reply('❌ Gagal mengambil data negara dari pusat.');
+
         const countries = res.data.data.map(c => ({
             text: `🌍 ${c.name}`,
-            // Callback: sp_[svcId]_[numId] (Disingkat agar tidak overload)
-            id: `sp_${serviceId}_${c.number_id}`
+            // Kirim ke: srv_[serviceId]_[numberId]
+            id: `srv_${serviceId}_${c.number_id}`
         }));
 
         await ctx.editMessageCaption(`🌍 *Pilih Negara (Hal ${page + 1}):*`, {
             parse_mode: 'Markdown',
             ...createPagination(countries, `cty_${serviceId}`, page)
         });
-    } catch (e) { ctx.reply('❌ Gagal memuat negara.'); }
+    } catch (e) { 
+        console.error(e);
+        ctx.reply('❌ Terjadi kesalahan saat memuat negara.'); 
+    }
 });
 
-// --- 4. STEP: PILIH SERVER / HARGA (Dari Pricelist) ---
-bot.action(/^sp_(.+)_(.+)$/, async (ctx) => {
+// --- 3. STEP: PILIH HARGA / SERVER (PENTING!) ---
+bot.action(/^srv_(.+)_(.+)$/, async (ctx) => {
     const [_, svcId, numId] = ctx.match;
+    
     try {
-        await ctx.answerCbQuery('Memuat Server...');
+        await ctx.answerCbQuery('Memuat Daftar Harga...');
+        
+        // Kita panggil lagi API Countries untuk dapet isi pricelist-nya
         const res = await roApi.get(`/v2/countries?service_id=${svcId}`);
         const country = res.data.data.find(c => c.number_id == numId);
         
-        if (!country) return ctx.reply('❌ Data tidak ditemukan.');
+        if (!country || !country.pricelist) {
+            return ctx.reply('❌ Maaf, harga untuk negara ini sedang tidak tersedia.');
+        }
 
         const buttons = country.pricelist.map(p => [
-            // Callback: so_[numId]_[provId]_[price] (Disingkat)
-            // country.name kita ambil dari variabel 'country' saja nanti
+            // Kirim ke: opr_[numId]_[provId]_[price]_[isoCode]
             Markup.button.callback(
                 `💰 Server ${p.server_id} - ${p.price_format}`, 
-                `so_${numId}_${p.provider_id}_${p.price}_${country.iso_code}`
+                `opr_${numId}_${p.provider_id}_${p.price}_${country.iso_code}`
             )
         ]);
 
-        buttons.push([Markup.button.callback('⬅️ Kembali', `svc_${svcId}`)]);
+        buttons.push([Markup.button.callback('⬅️ Kembali Pilih Negara', `svc_${svcId}`)]);
 
-        await ctx.editMessageCaption(`💵 *Pilih Server/Harga untuk ${country.name}:*`, {
+        await ctx.editMessageCaption(`💵 *Pilih Server & Harga untuk ${country.name}:*\nLayanan: ${country.prefix}`, {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard(buttons)
         });
-    } catch (e) { ctx.reply('❌ Gagal memuat harga.'); }
+    } catch (e) { 
+        ctx.reply('❌ Gagal memuat daftar harga server.'); 
+    }
 });
 
-// --- 5. STEP: PILIH OPERATOR ---
-bot.action(/^so_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
+// --- 4. STEP: PILIH OPERATOR ---
+bot.action(/^opr_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
     const [_, numId, provId, price, iso] = ctx.match;
+    
     try {
         await ctx.answerCbQuery('Memuat Operator...');
         const res = await roApi.get(`/v2/operators?country=${iso}&provider_id=${provId}`);
         
         let ops = res.data.data || [];
+        // Jika API tidak kasih list operator, kita buatkan tombol 'any' otomatis
         if (ops.length === 0) ops = [{ id: 'any', name: 'Otomatis (Any)' }];
 
         const buttons = ops.map(op => [
-            // Callback: cf_[numId]_[provId]_[opId]_[price]
-            Markup.button.callback(`📶 Op: ${op.name}`, `cf_${numId}_${provId}_${op.id}_${price}`)
+            // Kirim ke: cfm_[numId]_[provId]_[opId]_[price]
+            Markup.button.callback(`📶 Op: ${op.name}`, `cfm_${numId}_${provId}_${op.id}_${price}`)
         ]);
 
-        buttons.push([Markup.button.callback('⬅️ Ganti Server', `sp_13_${numId}`)]); // Default 13 atau buat dinamis
+        buttons.push([Markup.button.callback('⬅️ Ganti Harga/Server', `srv_13_${numId}`)]); // ID 13 bisa disesuaikan
 
         await ctx.editMessageCaption(`⚡ *Pilih Operator:*\nNegara: ${iso.toUpperCase()} | Harga: Rp ${parseInt(price).toLocaleString('id-ID')}`, {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard(buttons)
         });
-    } catch (e) { ctx.reply('❌ Gagal memuat operator.'); }
+    } catch (e) { 
+        ctx.reply('❌ Gagal memuat operator.'); 
+    }
 });
 
-// --- 6. STEP: KONFIRMASI ---
-bot.action(/^cf_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
+// --- 5. STEP: KONFIRMASI ---
+bot.action(/^cfm_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
     const [_, numId, provId, opId, price] = ctx.match;
 
     const msg = `🛒 *KONFIRMASI PESANAN*\n━━━━━━━━━━━━━━━━━━\n` +
                 `📶 Operator: *${opId.toUpperCase()}*\n` +
                 `💰 Biaya: *Rp ${parseInt(price).toLocaleString('id-ID')}*\n━━━━━━━━━━━━━━━━━━\n` +
-                `⚠️ _Saldo akan langsung terpotong._`;
+                `⚠️ _Saldo Manzzy ID Anda akan langsung terpotong._`;
 
     await ctx.editMessageCaption(msg, {
         parse_mode: 'Markdown',
