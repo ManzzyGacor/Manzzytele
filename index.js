@@ -143,59 +143,96 @@ bot.action('start_menu', async (ctx) => {
 });
 
 
-// STEP 1: Ambil Daftar Layanan
-bot.action('list_services', async (ctx) => {
-    try {
-        await ctx.answerCbQuery('Memuat Layanan...');
-        const res = await roApi.get('/v2/services');
-        if (!res.data.success) throw new Error('Gagal ambil layanan');
+// --- HELPER PAGINATION ---
+const createPagination = (data, prefix, currentPage = 0, itemsPerPage = 8) => {
+    const totalPages = Math.ceil(data.length / itemsPerPage);
+    const start = currentPage * itemsPerPage;
+    const end = start + itemsPerPage;
+    const items = data.slice(start, end);
 
-        const buttons = res.data.data.map(s => [Markup.button.callback(s.service_name, `svc_${s.service_code}`)]);
+    const buttons = items.map(item => [
+        Markup.button.callback(item.text, `${prefix}_${item.id}`)
+    ]);
+
+    const navRow = [];
+    if (currentPage > 0) navRow.push(Markup.button.callback('⬅️ Prev', `${prefix}page_${currentPage - 1}`));
+    if (currentPage < totalPages - 1) navRow.push(Markup.button.callback('Next ➡️', `${prefix}page_${currentPage + 1}`));
+    
+    if (navRow.length > 0) buttons.push(navRow);
+    buttons.push([Markup.button.callback('🏠 Menu Utama', 'start_menu')]);
+    
+    return Markup.inlineKeyboard(buttons);
+};
+
+// --- 1. LIST SERVICES DENGAN HALAMAN ---
+bot.action(/^(list_services|svcpage_(.+))$/, async (ctx) => {
+    try {
+        const page = ctx.match[2] ? parseInt(ctx.match[2]) : 0;
+        await ctx.answerCbQuery();
         
-        await ctx.editMessageCaption('📱 *Pilih Aplikasi/Layanan:*', {
+        const res = await roApi.get('/v2/services');
+        const services = res.data.data.map(s => ({ text: s.service_name, id: s.service_code }));
+
+        await ctx.editMessageCaption('📱 *Pilih Layanan (Hal ' + (page + 1) + '):*', {
             parse_mode: 'Markdown',
-            ...Markup.inlineKeyboard(buttons)
+            ...createPagination(services, 'svc', page)
         });
-    } catch (e) { ctx.reply('❌ Error: ' + e.message); }
+    } catch (e) { ctx.reply('❌ Gagal ambil layanan.'); }
 });
 
-// STEP 2: Pilih Negara (Berdasarkan Service ID)
-bot.action(/^svc_(.+)$/, async (ctx) => {
-    const serviceId = ctx.match[1];
+// --- 2. PILIH NEGARA DENGAN HALAMAN ---
+bot.action(/^(svc_(.+)|ctypage_(.+)_(.+))$/, async (ctx) => {
+    // svc_ID atau ctypage_ID_PAGE
+    const serviceId = ctx.match[2] || ctx.match[3];
+    const page = ctx.match[4] ? parseInt(ctx.match[4]) : 0;
+
     try {
-        await ctx.answerCbQuery('Mencari Negara...');
+        await ctx.answerCbQuery();
         const res = await roApi.get(`/v2/countries?service_id=${serviceId}`);
         
-        // Ambil 10 negara pertama agar tidak error "Message too long"
-        const buttons = res.data.data.slice(0, 10).map(c => [
-            Markup.button.callback(`${c.name} (${c.pricelist[0].price_format})`, `cty_${serviceId}_${c.name}_${c.pricelist[0].provider_id}_${c.pricelist[0].price}`)
-        ]);
+        const countries = res.data.data.map(c => ({
+            text: `${c.name} (${c.pricelist[0].price_format})`,
+            // Kita simpan data penting di callback: svcId_Negara_ProvId_Harga
+            id: `${serviceId}_${c.iso_code}_${c.pricelist[0].provider_id}_${c.pricelist[0].price}`
+        }));
 
-        await ctx.editMessageCaption('🌍 *Pilih Negara & Harga:*', {
+        await ctx.editMessageCaption('🌍 *Pilih Negara (Hal ' + (page + 1) + '):*', {
             parse_mode: 'Markdown',
-            ...Markup.inlineKeyboard([...buttons, [Markup.button.callback('⬅️ Kembali', 'list_services')]])
+            // Kita modifikasi prefix agar membawa serviceId: ctypage_SERVICEID
+            ...createPagination(countries, `cty_${serviceId}`, page)
         });
     } catch (e) { ctx.reply('❌ Gagal memuat negara.'); }
 });
 
-// STEP 3: Pilih Operator
-bot.action(/^cty_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
-    const [_, svcId, country, provId, price] = ctx.match;
+// --- 3. PILIH OPERATOR (FIXED) ---
+bot.action(/^cty_(.+)_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
+    // Format: cty_SVCID_ISO_PROV_PRICE
+    const [_, svcId, iso, provId, price] = ctx.match;
+    
     try {
         await ctx.answerCbQuery('Memuat Operator...');
-        const res = await roApi.get(`/v2/operators?country=${country}&provider_id=${provId}`);
+        // Gunakan ISO Code atau Name yang konsisten dari API
+        const res = await roApi.get(`/v2/operators?country=${iso}&provider_id=${provId}`);
         
+        if (!res.data.success || res.data.data.length === 0) {
+            return ctx.reply('❌ Tidak ada operator tersedia untuk negara ini.');
+        }
+
         const buttons = res.data.data.map(op => [
-            Markup.button.callback(`Operator: ${op.name}`, `order_${svcId}_${provId}_${op.id}_${price}`)
+            Markup.button.callback(`Op: ${op.name}`, `order_${svcId}_${provId}_${op.id}_${price}`)
         ]);
 
-        await ctx.editMessageCaption(`⚡ *Pilih Operator untuk ${country}:*\nHarga: ${formatRupiah(price)}`, {
+        buttons.push([Markup.button.callback('⬅️ Ganti Negara', `svc_${svcId}`)]);
+
+        await ctx.editMessageCaption(`⚡ *Pilih Operator:*\nHarga: Rp ${parseInt(price).toLocaleString('id-ID')}`, {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard(buttons)
         });
-    } catch (e) { ctx.reply('❌ Gagal memuat operator.'); }
+    } catch (e) { 
+        console.error(e.response?.data);
+        ctx.reply('❌ Gagal memuat operator. Pastikan stok negara tersedia.'); 
+    }
 });
-
 // STEP 4: Proses Order (Potong Saldo & Hit API)
 bot.action(/^order_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
     const [_, numId, provId, opId, price] = ctx.match;
