@@ -180,57 +180,74 @@ bot.action(/^(list_services|svcpage_(.+))$/, async (ctx) => {
     } catch (e) { ctx.reply('❌ Gagal ambil layanan.'); }
 });
 
-// --- 2. PILIH NEGARA DENGAN HALAMAN ---
+// --- 2. PILIH NEGARA & HARGA (PAGINATION) ---
 bot.action(/^(svc_(.+)|ctypage_(.+)_(.+))$/, async (ctx) => {
-    // svc_ID atau ctypage_ID_PAGE
-    const serviceId = ctx.match[2] || ctx.match[3];
+    const serviceId = ctx.match[2] || ctx.match[3]; // Ini ID Aplikasi (misal: 13 untuk WA)
     const page = ctx.match[4] ? parseInt(ctx.match[4]) : 0;
 
     try {
-        await ctx.answerCbQuery();
+        await ctx.answerCbQuery('Mencari Negara...');
         const res = await roApi.get(`/v2/countries?service_id=${serviceId}`);
         
-        const countries = res.data.data.map(c => ({
-            text: `${c.name} (${c.pricelist[0].price_format})`,
-            // Kita simpan data penting di callback: svcId_Negara_ProvId_Harga
-            id: `${serviceId}_${c.iso_code}_${c.pricelist[0].provider_id}_${c.pricelist[0].price}`
-        }));
+        if (!res.data.success) throw new Error('API Error');
 
-        await ctx.editMessageCaption('🌍 *Pilih Negara (Hal ' + (page + 1) + '):*', {
+        const countries = res.data.data.map(c => {
+            // Kita ambil pricelist pertama sebagai default
+            const p = c.pricelist[0]; 
+            return {
+                text: `🌍 ${c.name} (${p.price_format})`,
+                // DATA: svcId | numberId | providerId | price | countryName
+                id: `${serviceId}_${c.number_id}_${p.provider_id}_${p.price}_${c.name.replace(/ /g, '%20')}`
+            };
+        });
+
+        await ctx.editMessageCaption(`🌍 *Pilih Negara & Harga (Hal ${page + 1}):*`, {
             parse_mode: 'Markdown',
-            // Kita modifikasi prefix agar membawa serviceId: ctypage_SERVICEID
             ...createPagination(countries, `cty_${serviceId}`, page)
         });
-    } catch (e) { ctx.reply('❌ Gagal memuat negara.'); }
+    } catch (e) { 
+        ctx.reply('❌ Gagal memuat negara. Pastikan Service ID benar.'); 
+    }
 });
 
-// --- 3. PILIH OPERATOR (FIXED) ---
-bot.action(/^cty_(.+)_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
-    // Format: cty_SVCID_ISO_PROV_PRICE
-    const [_, svcId, iso, provId, price] = ctx.match;
+// --- 3. PILIH OPERATOR (MENGGUNAKAN NAME & PROVIDER_ID) ---
+bot.action(/^cty_(.+)_(.+)_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
+    // Format: cty_SVCID_NUMID_PROVID_PRICE_COUNTRYNAME
+    const [_, svcId, numId, provId, price, countryName] = ctx.match;
     
     try {
         await ctx.answerCbQuery('Memuat Operator...');
-        // Gunakan ISO Code atau Name yang konsisten dari API
-        const res = await roApi.get(`/v2/operators?country=${iso}&provider_id=${provId}`);
         
-        if (!res.data.success || res.data.data.length === 0) {
-            return ctx.reply('❌ Tidak ada operator tersedia untuk negara ini.');
+        // Memanggil operator berdasarkan Nama Negara dan Provider ID sesuai dokumentasi
+        const url = `/v2/operators?country=${countryName}&provider_id=${provId}`;
+        const res = await roApi.get(url);
+        
+        const textDetail = `🌍 Negara: *${countryName.replace(/%20/g, ' ')}*\n💰 Harga: *Rp ${parseInt(price).toLocaleString('id-ID')}*`;
+
+        if (!res.data.success || !res.data.data || res.data.data.length === 0) {
+            // Jika list operator kosong, arahkan ke 'any'
+            return ctx.editMessageCaption(`${textDetail}\n\n⚠️ Operator spesifik kosong. Gunakan otomatis?`, {
+                parse_mode: 'Markdown',
+                ...Markup.inlineKeyboard([
+                    [Markup.button.callback('✅ Ya, Pakai Any', `order_${numId}_${provId}_any_${price}`)],
+                    [Markup.button.callback('⬅️ Ganti Negara', `svc_${svcId}`)]
+                ])
+            });
         }
 
         const buttons = res.data.data.map(op => [
-            Markup.button.callback(`Op: ${op.name}`, `order_${svcId}_${provId}_${op.id}_${price}`)
+            // Kirim numId (dari negara) bukan svcId ke proses order!
+            Markup.button.callback(`📶 Op: ${op.name}`, `order_${numId}_${provId}_${op.id}_${price}`)
         ]);
 
-        buttons.push([Markup.button.callback('⬅️ Ganti Negara', `svc_${svcId}`)]);
+        buttons.push([Markup.button.callback('⬅️ Kembali', `svc_${svcId}`)]);
 
-        await ctx.editMessageCaption(`⚡ *Pilih Operator:*\nHarga: Rp ${parseInt(price).toLocaleString('id-ID')}`, {
+        await ctx.editMessageCaption(`⚡ *Pilih Operator:*\n${textDetail}`, {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard(buttons)
         });
     } catch (e) { 
-        console.error(e.response?.data);
-        ctx.reply('❌ Gagal memuat operator. Pastikan stok negara tersedia.'); 
+        ctx.reply('❌ Gagal memuat operator.'); 
     }
 });
 // STEP 4: Proses Order (Potong Saldo & Hit API)
