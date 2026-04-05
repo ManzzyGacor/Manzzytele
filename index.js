@@ -506,8 +506,7 @@ bot.action(/^cncl_(.+)_(.+)$/, async (ctx) => {
     }
 });
 
-// NOTIF TESTI KE CHANNEL
-const CHANNEL_ID = process.env.CHANNEL_ID; // Pastikan sudah diisi di .env
+// NOTIF TESTI KE 
 
 // --- FUNGSI KIRIM TESTIMONI OTOMATIS ---
 const sendTesti = async (data) => {
