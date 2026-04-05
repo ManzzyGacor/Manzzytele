@@ -460,9 +460,17 @@ bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
 
         await ctx.answerCbQuery('🚀 Memproses Order Nomor...');
 
-        // 2. PANGGIL API V2 (Sesuai Dokumentasi Kamu)
-        // Format: /v2/orders?number_id=...&provider_id=...&operator_id=...
-        const orderRes = await roApi.get(`/v2/orders?number_id=${numId}&provider_id=${provId}&operator_id=${opId}`);
+        // --- TAMBAHKAN LOG INI UNTUK CEK ISI VARIABEL ---
+        console.log(`[DEBUG API V2] URL: /v2/orders?number_id=${numId}&provider_id=${provId}&operator_id=${opId}`);
+
+        // Panggil API V2
+        const orderRes = await roApi.get('/v2/orders', {
+            params: {
+                number_id: numId,
+                provider_id: provId,
+                operator_id: opId
+            }
+        });
 
         if (orderRes.data && orderRes.data.success === true) {
             const order = orderRes.data.data;
@@ -487,7 +495,7 @@ bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
             });
         } else {
             // Jika sukses: false, tampilkan pesan error dari API
-            const errorMsg = orderRes.data?.message || "Terjadi kesalahan pada API RumahOTP.";
+            const errorMsg = orderRes.data?.message || "Terjadi kesalahan pada Server.";
             ctx.reply(`❌ Gagal Order: ${errorMsg}`);
         }
     } catch (e) {
