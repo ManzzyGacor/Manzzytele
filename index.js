@@ -432,6 +432,7 @@ bot.action(/^cf_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
     await ctx.editMessageCaption(msg, {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
+            // KITA LEMPAR 4 DATA: numId, provId, opId, price
             [Markup.button.callback('✅ BELI SEKARANG', `buy_${numId}_${provId}_${opId}_${price}`)],
             [Markup.button.callback('❌ BATAL', 'start_menu')]
         ])
@@ -439,28 +440,29 @@ bot.action(/^cf_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
 });
 
 // --- 6. STEP: BELI NOMOR (EKSEKUSI) ---
+// Regex ini harus punya 4 kelompok (.+) setelah buy_
 bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
-    // Pastikan urutan variabel ini pas dengan yang dikirim tombol Step 3
-    const [_, numId, provId, price, iso] = ctx.match; 
+    // KITA TANGKAP 4 DATA: [1]numId, [2]provId, [3]opId, [4]price
+    const [_, numId, provId, opId, price] = ctx.match; 
     const userId = ctx.from.id;
 
     try {
         const user = await User.findOne({ telegramId: userId });
 
-        // 1. CEK SALDO (Ganti 'price' jadi 'price')
+        // CEK SALDO (Sekarang 'price' sudah pasti berisi angka dari urutan ke-4)
         if (!user || user.saldo < parseInt(price)) {
             return ctx.answerCbQuery(`❌ Saldo kurang! Butuh Rp ${parseInt(price).toLocaleString('id-ID')}`, { show_alert: true });
         }
 
         await ctx.answerCbQuery('Memproses pesanan...');
 
-        // 2. ORDER KE RUMAOTP
+        // ORDER KE RUMAOTP
         const orderRes = await roApi.get(`/v1/orders/create?number_id=${numId}&provider_id=${provId}`);
 
         if (orderRes.data && orderRes.data.success === true) {
             const order = orderRes.data.data;
             
-            // 3. POTONG SALDO (Ganti 'price' jadi 'price')
+            // POTONG SALDO
             user.saldo -= parseInt(price);
             await user.save();
 
@@ -475,7 +477,6 @@ bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
                 parse_mode: 'Markdown',
                 ...Markup.inlineKeyboard([
                     [Markup.button.callback('📩 CEK OTP', `status_${order.order_id}`)],
-                    // Tombol batal juga harus pakai price biar refund-nya bener
                     [Markup.button.callback('❌ BATALKAN & REFUND', `cncl_${order.order_id}_${price}`)]
                 ])
             });
@@ -484,12 +485,10 @@ bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
             ctx.reply(`❌ Gagal: ${alasanGagal}`);
         }
     } catch (e) {
-        // Ganti 'price' di log atau reply jika ada
         console.error("ERROR EXEC ORDER:", e.message);
         ctx.reply('❌ Sistem error saat eksekusi pembelian.');
     }
 });
-
 // step 7
 bot.action(/^status_(.+)$/, async (ctx) => {
     const orderId = ctx.match[1];
