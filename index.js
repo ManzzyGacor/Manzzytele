@@ -181,8 +181,24 @@ bot.action(/^(list_services|svcpage_(.+))$/, async (ctx) => {
 });
 
 // --- 2. STEP: PILIH NEGARA ---
+bot.action(/^(list_services|svcpage_(.+))$/, async (ctx) => {
+    try {
+        const page = ctx.match[2] ? parseInt(ctx.match[2]) : 0;
+        await ctx.answerCbQuery();
+        
+        const res = await roApi.get('/v2/services');
+        const services = res.data.data.map(s => ({ text: s.service_name, id: s.service_code }));
+
+        await ctx.editMessageCaption('📱 *Pilih Layanan:*', {
+            parse_mode: 'Markdown',
+            ...createPagination(services, 'svc', page)
+        });
+    } catch (e) { ctx.reply('❌ Gagal ambil layanan.'); }
+});
+
+// --- 3. STEP: PILIH NEGARA (Setelah Pilih Layanan) ---
 bot.action(/^(svc_(.+)|ctypage_(.+)_(.+))$/, async (ctx) => {
-    const serviceId = ctx.match[2] || ctx.match[3]; 
+    const serviceId = ctx.match[2] || ctx.match[3];
     const page = ctx.match[4] ? parseInt(ctx.match[4]) : 0;
 
     try {
@@ -191,87 +207,82 @@ bot.action(/^(svc_(.+)|ctypage_(.+)_(.+))$/, async (ctx) => {
         
         const countries = res.data.data.map(c => ({
             text: `🌍 ${c.name}`,
-            // Kirim ke: selprice_[svcId]_[numId]_[countryName]
-            id: `selp_${serviceId}_${c.number_id}_${c.name.replace(/ /g, '%20')}`
+            // Callback: sp_[svcId]_[numId] (Disingkat agar tidak overload)
+            id: `sp_${serviceId}_${c.number_id}`
         }));
 
-        await ctx.editMessageCaption(`🌍 *Pilih Negara:*`, {
+        await ctx.editMessageCaption(`🌍 *Pilih Negara (Hal ${page + 1}):*`, {
             parse_mode: 'Markdown',
             ...createPagination(countries, `cty_${serviceId}`, page)
         });
     } catch (e) { ctx.reply('❌ Gagal memuat negara.'); }
 });
 
-// --- 3. STEP: PILIH HARGA (SERVER) ---
-bot.action(/^selp_(.+)_(.+)_(.+)$/, async (ctx) => {
-    const [_, svcId, numId, countryName] = ctx.match;
-    const cleanCountry = countryName.replace(/%20/g, ' ');
-
+// --- 4. STEP: PILIH SERVER / HARGA (Dari Pricelist) ---
+bot.action(/^sp_(.+)_(.+)$/, async (ctx) => {
+    const [_, svcId, numId] = ctx.match;
     try {
-        await ctx.answerCbQuery('Memuat Server & Harga...');
+        await ctx.answerCbQuery('Memuat Server...');
         const res = await roApi.get(`/v2/countries?service_id=${svcId}`);
-        const countryData = res.data.data.find(c => c.number_id == numId);
+        const country = res.data.data.find(c => c.number_id == numId);
         
-        if (!countryData || !countryData.pricelist) return ctx.reply('❌ Server tidak tersedia.');
+        if (!country) return ctx.reply('❌ Data tidak ditemukan.');
 
-        const buttons = countryData.pricelist.map(p => [
-            // Kirim ke: selop_[svcId]_[numId]_[provId]_[price]_[countryName]
+        const buttons = country.pricelist.map(p => [
+            // Callback: so_[numId]_[provId]_[price] (Disingkat)
+            // country.name kita ambil dari variabel 'country' saja nanti
             Markup.button.callback(
                 `💰 Server ${p.server_id} - ${p.price_format}`, 
-                `selo_${svcId}_${numId}_${p.provider_id}_${p.price}_${countryName}`
+                `so_${numId}_${p.provider_id}_${p.price}_${country.iso_code}`
             )
         ]);
 
-        buttons.push([Markup.button.callback('⬅️ Kembali ke Negara', `svc_${svcId}`)]);
+        buttons.push([Markup.button.callback('⬅️ Kembali', `svc_${svcId}`)]);
 
-        await ctx.editMessageCaption(`💵 *Pilih Server/Harga untuk ${cleanCountry}:*`, {
+        await ctx.editMessageCaption(`💵 *Pilih Server/Harga untuk ${country.name}:*`, {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard(buttons)
         });
     } catch (e) { ctx.reply('❌ Gagal memuat harga.'); }
 });
 
-// --- 4. STEP: PILIH OPERATOR ---
-bot.action(/^selo_(.+)_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
-    const [_, svcId, numId, provId, price, countryName] = ctx.match;
-    const cleanCountry = countryName.replace(/%20/g, ' ');
-
+// --- 5. STEP: PILIH OPERATOR ---
+bot.action(/^so_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
+    const [_, numId, provId, price, iso] = ctx.match;
     try {
         await ctx.answerCbQuery('Memuat Operator...');
-        const res = await roApi.get(`/v2/operators?country=${countryName}&provider_id=${provId}`);
+        const res = await roApi.get(`/v2/operators?country=${iso}&provider_id=${provId}`);
         
-        let operators = res.data.data || [];
-        if (operators.length === 0) operators = [{ id: 'any', name: 'Otomatis (Any)' }];
+        let ops = res.data.data || [];
+        if (ops.length === 0) ops = [{ id: 'any', name: 'Otomatis (Any)' }];
 
-        const buttons = operators.map(op => [
-            // Kirim ke: conf_[numId]_[provId]_[opId]_[price]_[countryName]
-            Markup.button.callback(`📶 Operator: ${op.name}`, `conf_${numId}_${provId}_${op.id}_${price}_${countryName}`)
+        const buttons = ops.map(op => [
+            // Callback: cf_[numId]_[provId]_[opId]_[price]
+            Markup.button.callback(`📶 Op: ${op.name}`, `cf_${numId}_${provId}_${op.id}_${price}`)
         ]);
 
-        buttons.push([Markup.button.callback('⬅️ Kembali ke Harga', `selp_${svcId}_${numId}_${countryName}`)]);
+        buttons.push([Markup.button.callback('⬅️ Ganti Server', `sp_13_${numId}`)]); // Default 13 atau buat dinamis
 
-        await ctx.editMessageCaption(`⚡ *Pilih Operator:*\n🌍 ${cleanCountry} | 💰 Rp ${parseInt(price).toLocaleString('id-ID')}`, {
+        await ctx.editMessageCaption(`⚡ *Pilih Operator:*\nNegara: ${iso.toUpperCase()} | Harga: Rp ${parseInt(price).toLocaleString('id-ID')}`, {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard(buttons)
         });
     } catch (e) { ctx.reply('❌ Gagal memuat operator.'); }
 });
 
-// --- 5. STEP: KONFIRMASI ---
-bot.action(/^conf_(.+)_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
-    const [_, numId, provId, opId, price, countryName] = ctx.match;
-    const cleanCountry = countryName.replace(/%20/g, ' ');
+// --- 6. STEP: KONFIRMASI ---
+bot.action(/^cf_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
+    const [_, numId, provId, opId, price] = ctx.match;
 
     const msg = `🛒 *KONFIRMASI PESANAN*\n━━━━━━━━━━━━━━━━━━\n` +
-                `🌍 Negara: *${cleanCountry}*\n` +
                 `📶 Operator: *${opId.toUpperCase()}*\n` +
                 `💰 Biaya: *Rp ${parseInt(price).toLocaleString('id-ID')}*\n━━━━━━━━━━━━━━━━━━\n` +
-                `⚠️ _Klik tombol di bawah untuk memproses pembelian._`;
+                `⚠️ _Saldo akan langsung terpotong._`;
 
     await ctx.editMessageCaption(msg, {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
-            [Markup.button.callback('✅ BELI SEKARANG', `exec_${numId}_${provId}_op${opId}_${price}`)],
+            [Markup.button.callback('✅ BELI SEKARANG', `ex_${numId}_${provId}_${opId}_${price}`)],
             [Markup.button.callback('❌ BATAL', 'start_menu')]
         ])
     });
