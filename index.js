@@ -514,7 +514,7 @@ bot.action(/^status_(.+)_(.+)$/, async (ctx) => {
         await ctx.answerCbQuery();
 
         // Gunakan v2 untuk cek status agar lebih akurat
-        const res = await roApi.get(`/v2/orders/status?order_id=${orderId}`);
+        const res = await roApi.get(`/v1/orders/status?order_id=${orderId}`);
         const data = res.data.data;
 
         if (data.otp_code) {
@@ -591,7 +591,7 @@ bot.action(/^cncl_(.+)_(.+)$/, async (ctx) => {
     try {
         await ctx.answerCbQuery('Memproses Refund...');
         // 1. Tembak API RumahOTP untuk cancel
-        const res = await roApi.get(`/v2/orders/cancel?order_id=${orderId}`);
+        const res = await roApi.get(`/v1/orders/cancel?order_id=${orderId}`);
         
         if (res.data.success) {
             // 2. Kembalikan saldo di database
