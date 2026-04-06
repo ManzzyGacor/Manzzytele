@@ -505,29 +505,35 @@ bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
     }
 });
 
-// --- 7. STEP: CEK STATUS OTP (FIXED & SAFE) ---
+// --- 7. STEP: CEK STATUS OTP (FIXED V1 GET_STATUS) ---
 bot.action(/^status_(.+)_(.+)$/, async (ctx) => {
     const [_, orderId, price] = ctx.match; 
     
     try {
-        await ctx.answerCbQuery(); // Matikan loading biru
+        await ctx.answerCbQuery(); // Hilangkan loading biru
 
-        // Tembak API v2
-        const res = await roApi.get(`/v1/orders/status?order_id=${orderId}`);
+        // 1. Tembak API v1 sesuai dokumentasi terbaru lu
+        // URL: /v1/orders/get_status?order_id=ORDER_ID
+        const res = await roApi.get(`/v1/orders/get_status`, {
+            params: { order_id: orderId.trim() }
+        });
+
+        // 2. Ambil data (biasanya v1 itu res.data.data)
         const data = res.data?.data;
 
-        // VALIDASI: Kalau data order gak ketemu di API
+        // Validasi jika data kosong
         if (!data) {
-            return ctx.reply('❌ Data order tidak ditemukan atau sudah expired.');
+            console.log("[DEBUG API V1] Respon Kosong:", res.data);
+            return ctx.reply(`❌ Order ID \`${orderId}\` tidak ditemukan atau sudah kadaluwarsa.`);
         }
 
-        // CEK APAKAH OTP SUDAH MUNCUL
-        if (data.otp_code) {
-            // --- KONDISI 1: OTP ADA ---
+        // 3. CEK APAKAH OTP SUDAH MUNCUL
+        // Di v1, field-nya tetap otp_code (biasanya string kosong "" atau null kalau belum ada)
+        if (data.otp_code && data.otp_code !== "") {
             const msgSuccess = `📩 *OTP DITERIMA!*\n━━━━━━━━━━━━━━━━━━\n` +
                                `🔢 Kode: \`${data.otp_code}\`\n` +
                                `📝 Pesan: \`${data.otp_msg}\`\n━━━━━━━━━━━━━━━━━━\n` +
-                               `✅ _Selesaikan order jika sudah berhasil login._`;
+                               `✅ _Gunakan kode segera!_`;
 
             await ctx.editMessageText(msgSuccess, { 
                 parse_mode: 'Markdown',
@@ -536,24 +542,24 @@ bot.action(/^status_(.+)_(.+)$/, async (ctx) => {
                 ])
             });
 
-            // Kirim Testi ke Channel
+            // Kirim Testi (Gunakan harga dari Step 6)
             await sendTesti({
                 username: ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name,
-                service: data.service,
-                country: data.country,
+                service: data.service || 'WhatsApp',
+                country: data.country || 'Indonesia',
                 price: parseInt(price) || 0,
                 orderId: orderId
             });
 
         } else {
-            // --- KONDISI 2: OTP MASIH KOSONG ---
+            // --- JIKA OTP BELUM MASUK ---
             const timeNow = new Date().toLocaleTimeString('id-ID');
             
             const msgWaiting = `⏳ *MENUNGGU OTP...*\n━━━━━━━━━━━━━━━━━━\n` +
-                               `📞 Nomor: \`${data.phone_number}\`\n` +
+                               `📞 Nomor: \`${data.phone_number || 'Sedang diproses'}\`\n` +
                                `🆔 Order ID: \`${orderId}\`\n` +
                                `🕒 Terakhir Cek: *${timeNow}*\n━━━━━━━━━━━━━━━━━━\n` +
-                               `ℹ️ _OTP belum masuk. Status saat ini: ${data.status || 'Waiting'}_`;
+                               `ℹ️ _OTP belum masuk. Klik Refresh lagi nanti atau Batal._`;
 
             await ctx.editMessageText(msgWaiting, {
                 parse_mode: 'Markdown',
@@ -564,25 +570,54 @@ bot.action(/^status_(.+)_(.+)$/, async (ctx) => {
             });
         }
     } catch (e) { 
-        console.error("ERROR STATUS:", e.message);
-        ctx.reply('❌ Gagal cek status ke Server RumahOTP.'); 
+        console.error("ERROR GET_STATUS V1:", e.message);
+        ctx.reply('❌ Terjadi kesalahan saat cek status ke API.'); 
     }
 });
-// --- 9. STEP: SELESAIKAN ORDER (BARU KONFIRMASI) ---
+// --- 9. STEP: SELESAIKAN ORDER (STATUS COMPLETED) ---
 bot.action(/^done_(.+)$/, async (ctx) => {
     const orderId = ctx.match[1];
+    
     try {
-        await ctx.answerCbQuery('Menyelesaikan...');
-        // Baru di sini kita tembak SET_STATUS dengan parameter DONE
-        const res = await roApi.get(`/v1/orders/set_status?order_id=${orderId}&status=done`);
-        
-        if (res.data.success) {
-            await ctx.reply(`✅ *ORDER SELESAI*\nNomor untuk Order ID \`${orderId}\` telah dikonfirmasi selesai. Terima kasih!`);
-            // Opsional: Hapus pesan tombol biar gak diklik lagi
-            try { await ctx.deleteMessage(); } catch (err) {}
+        await ctx.answerCbQuery('✅ Menyelesaikan pesanan...');
+
+        // Tembak API v1 set_status (Sama seperti cancel, tapi statusnya beda)
+        // Gunakan status 'completed' sesuai standar API RumahOTP
+        const res = await roApi.get(`/v1/orders/set_status`, {
+            params: {
+                order_id: orderId,
+                status: 'completed' // Mengunci order agar permanen selesai
+            }
+        });
+
+        if (res.data && res.data.success === true) {
+            const finishMsg = `✅ *ORDER SELESAI SAKSES!*\n━━━━━━━━━━━━━━━━━━\n` +
+                              `🆔 Order ID: \`${orderId}\`\n` +
+                              `🙏 Terima kasih telah menggunakan layanan Manzzy ID.\n━━━━━━━━━━━━━━━━━━\n` +
+                              `ℹ️ _Nomor ini sudah tidak bisa dibatalkan/refund._`;
+
+            // Kirim pesan baru sebagai konfirmasi final
+            await ctx.reply(finishMsg, { 
+                parse_mode: 'Markdown',
+                ...Markup.inlineKeyboard([
+                    [Markup.button.callback('🏠 MENU UTAMA', 'start_menu')]
+                ])
+            });
+
+            // Hapus pesan lama yang ada tombol 'SELESAIKAN' agar tidak di-spam
+            try { 
+                await ctx.deleteMessage(); 
+            } catch (err) {
+                // Jika gagal hapus (misal pesan > 48 jam), edit saja pesannya
+                await ctx.editMessageText(`✅ Order \`${orderId}\` Selesai.`);
+            }
+        } else {
+            const errMsg = res.data?.message || "Gagal menyelesaikan di server.";
+            ctx.reply(`❌ Gagal: ${errMsg}`);
         }
     } catch (e) {
-        ctx.reply('❌ Gagal menyelesaikan order.');
+        console.error("ERROR DONE ORDER:", e.message);
+        ctx.reply('❌ Terjadi kesalahan saat menyelesaikan order.');
     }
 });
 
