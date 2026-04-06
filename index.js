@@ -504,25 +504,30 @@ bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
         ctx.reply('❌ Terjadi kesalahan sistem. Silakan coba lagi nanti.');
     }
 });
-// --- 7. STEP: CEK STATUS OTP ---
+
+// --- 7. STEP: CEK STATUS OTP (FIXED & SAFE) ---
 bot.action(/^status_(.+)_(.+)$/, async (ctx) => {
-    // [1] orderId, [2] price
     const [_, orderId, price] = ctx.match; 
     
     try {
-        // WAJIB: Panggil ini di awal agar loading biru di Telegram user hilang
-        await ctx.answerCbQuery();
+        await ctx.answerCbQuery(); // Matikan loading biru
 
-        // Gunakan v2 untuk cek status agar lebih akurat
+        // Tembak API v2
         const res = await roApi.get(`/v1/orders/status?order_id=${orderId}`);
-        const data = res.data.data;
+        const data = res.data?.data;
 
+        // VALIDASI: Kalau data order gak ketemu di API
+        if (!data) {
+            return ctx.reply('❌ Data order tidak ditemukan atau sudah expired.');
+        }
+
+        // CEK APAKAH OTP SUDAH MUNCUL
         if (data.otp_code) {
-            // --- 1. JIKA OTP MASUK ---
+            // --- KONDISI 1: OTP ADA ---
             const msgSuccess = `📩 *OTP DITERIMA!*\n━━━━━━━━━━━━━━━━━━\n` +
                                `🔢 Kode: \`${data.otp_code}\`\n` +
                                `📝 Pesan: \`${data.otp_msg}\`\n━━━━━━━━━━━━━━━━━━\n` +
-                               `✅ _Order selesai otomatis jika OTP sudah digunakan._`;
+                               `✅ _Selesaikan order jika sudah berhasil login._`;
 
             await ctx.editMessageText(msgSuccess, { 
                 parse_mode: 'Markdown',
@@ -531,7 +536,7 @@ bot.action(/^status_(.+)_(.+)$/, async (ctx) => {
                 ])
             });
 
-            // Kirim Testi ke Channel (Gunakan nominal price dari tombol awal)
+            // Kirim Testi ke Channel
             await sendTesti({
                 username: ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name,
                 service: data.service,
@@ -541,17 +546,16 @@ bot.action(/^status_(.+)_(.+)$/, async (ctx) => {
             });
 
         } else {
-            // --- 2. JIKA OTP BELUM MASUK ---
+            // --- KONDISI 2: OTP MASIH KOSONG ---
             const timeNow = new Date().toLocaleTimeString('id-ID');
-
-            const refreshMsg = `⏳ *MENUNGGU OTP...*\n━━━━━━━━━━━━━━━━━━\n` +
+            
+            const msgWaiting = `⏳ *MENUNGGU OTP...*\n━━━━━━━━━━━━━━━━━━\n` +
                                `📞 Nomor: \`${data.phone_number}\`\n` +
                                `🆔 Order ID: \`${orderId}\`\n` +
                                `🕒 Terakhir Cek: *${timeNow}*\n━━━━━━━━━━━━━━━━━━\n` +
-                               `ℹ️ _OTP belum masuk. Silakan cek lagi beberapa saat atau batalkan pesanan._`;
+                               `ℹ️ _OTP belum masuk. Status saat ini: ${data.status || 'Waiting'}_`;
 
-            // Update pesan dan TETAP sertakan harga di callback agar tombol tetap berfungsi
-            await ctx.editMessageText(refreshMsg, {
+            await ctx.editMessageText(msgWaiting, {
                 parse_mode: 'Markdown',
                 ...Markup.inlineKeyboard([
                     [Markup.button.callback('🔄 REFRESH / CEK OTP', `status_${orderId}_${price}`)],
@@ -560,9 +564,8 @@ bot.action(/^status_(.+)_(.+)$/, async (ctx) => {
             });
         }
     } catch (e) { 
-        console.error("ERROR CHECK OTP:", e.message);
-        // Jika gagal, beri notifikasi ke user agar tidak bingung
-        ctx.answerCbQuery('❌ Gagal cek status ke Server.', { show_alert: true }); 
+        console.error("ERROR STATUS:", e.message);
+        ctx.reply('❌ Gagal cek status ke Server RumahOTP.'); 
     }
 });
 // --- 9. STEP: SELESAIKAN ORDER (BARU KONFIRMASI) ---
