@@ -513,53 +513,45 @@ bot.action(/^status_(.+)_(.+)$/, async (ctx) => {
         await ctx.answerCbQuery(); // Hilangkan loading biru
 
         // 1. Tembak API v1 sesuai dokumentasi terbaru lu
-        // URL: /v1/orders/get_status?order_id=ORDER_ID
+
         const res = await roApi.get(`/v1/orders/get_status`, {
             params: { order_id: orderId.trim() }
         });
 
-        // 2. Ambil data (biasanya v1 itu res.data.data)
+
         const data = res.data?.data;
 
-        // Validasi jika data kosong
-        if (!data) {
-            console.log("[DEBUG API V1] Respon Kosong:", res.data);
-            return ctx.reply(`❌ Order ID \`${orderId}\` tidak ditemukan atau sudah kadaluwarsa.`);
-        }
+        // LOGIKA BARU: Cek apakah otp_code ada, bukan null, dan panjangnya lebih dari 0
+        const isOtpValid = data && data.otp_code && String(data.otp_code).trim().length > 0;
 
-        // 3. CEK APAKAH OTP SUDAH MUNCUL
-        // Di v1, field-nya tetap otp_code (biasanya string kosong "" atau null kalau belum ada)
-        if (data.otp_code && data.otp_code !== "") {
+        if (isOtpValid) {
+            // --- 1. JIKA OTP BENAR-BENAR ADA (Angka/Kode Muncul) ---
             const msgSuccess = `📩 *OTP DITERIMA!*\n━━━━━━━━━━━━━━━━━━\n` +
                                `🔢 Kode: \`${data.otp_code}\`\n` +
                                `📝 Pesan: \`${data.otp_msg}\`\n━━━━━━━━━━━━━━━━━━\n` +
-                               `✅ _Gunakan kode segera!_`;
+                               `✅ _Gunakan segera!_`;
 
             await ctx.editMessageText(msgSuccess, { 
                 parse_mode: 'Markdown',
-                ...Markup.inlineKeyboard([
-                    [Markup.button.callback('✅ SELESAIKAN ORDER', `done_${orderId}`)]
-                ])
+                ...Markup.inlineKeyboard([[Markup.button.callback('✅ SELESAIKAN ORDER', `done_${orderId}`)]])
             });
 
-            // Kirim Testi (Gunakan harga dari Step 6)
+            // Kirim Testi
             await sendTesti({
                 username: ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name,
-                service: data.service || 'WhatsApp',
-                country: data.country || 'Indonesia',
-                price: parseInt(price) || 0,
-                orderId: orderId
+                service: data.service, country: data.country, price: parseInt(price), orderId: orderId
             });
 
         } else {
-            // --- JIKA OTP BELUM MASUK ---
+            // --- 2. JIKA OTP BELUM ADA (Kosong, null, atau cuma spasi) ---
             const timeNow = new Date().toLocaleTimeString('id-ID');
             
             const msgWaiting = `⏳ *MENUNGGU OTP...*\n━━━━━━━━━━━━━━━━━━\n` +
-                               `📞 Nomor: \`${data.phone_number || 'Sedang diproses'}\`\n` +
+                               `📞 Nomor: \`${data?.phone_number || 'Sedang diproses'}\`\n` +
                                `🆔 Order ID: \`${orderId}\`\n` +
                                `🕒 Terakhir Cek: *${timeNow}*\n━━━━━━━━━━━━━━━━━━\n` +
-                               `ℹ️ _OTP belum masuk. Klik Refresh lagi nanti atau Batal._`;
+                               `ℹ️ _OTP belum masuk di server RumahOTP._\n` +
+                               `⚠️ _Status: ${data?.status || 'Active'}_`;
 
             await ctx.editMessageText(msgWaiting, {
                 parse_mode: 'Markdown',
@@ -569,6 +561,7 @@ bot.action(/^status_(.+)_(.+)$/, async (ctx) => {
                 ])
             });
         }
+// ...
     } catch (e) { 
         console.error("ERROR GET_STATUS V1:", e.message);
         ctx.reply('❌ Terjadi kesalahan saat cek status ke API.'); 
