@@ -443,25 +443,25 @@ bot.action(/^cf_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
     });
 });
 
+// step 6
 bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
     // [1]numId, [2]provId, [3]opId, [4]price
     const [_, numId, provId, opId, price] = ctx.match; 
     const userId = ctx.from.id;
 
     try {
+        // 1. LANGSUNG MATIKAN LOADING TELEGRAM (Cukup begini, JANGAN tambahkan .hide())
+        await ctx.answerCbQuery('🚀 Memproses Order...');
+
         const user = await User.findOne({ telegramId: userId });
 
-        // 1. Cek Saldo
+        // 2. Cek Saldo
         if (!user || user.saldo < parseInt(price)) {
-            return ctx.answerCbQuery(`❌ Saldo kurang! Butuh Rp ${parseInt(price).toLocaleString('id-ID')}`, { show_alert: true });
+            // Gunakan reply agar pesan muncul di chat, bukan pop-up yang sering error 'hide'
+            return ctx.reply(`❌ Saldo kurang! Butuh Rp ${parseInt(price).toLocaleString('id-ID')}`);
         }
 
-        await ctx.answerCbQuery('🚀 Memproses Order Nomor...');
-
-        // LOG DEBUG (Cek di pm2 logs)
-        console.log(`[DEBUG API V2] URL: /v2/orders?number_id=${numId}&provider_id=${provId}&operator_id=${opId}`);
-
-        // 2. Panggil API V2
+        // 3. Panggil API V2
         const orderRes = await roApi.get('/v2/orders', {
             params: {
                 number_id: numId,
@@ -473,7 +473,7 @@ bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
         if (orderRes.data && orderRes.data.success === true) {
             const order = orderRes.data.data;
             
-            // 3. Potong Saldo
+            // 4. Potong Saldo
             user.saldo -= parseInt(price);
             await user.save();
 
@@ -484,7 +484,6 @@ bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
                                `💰 Harga: Rp ${parseInt(price).toLocaleString('id-ID')}\n━━━━━━━━━━━━━━━━━━\n` +
                                `🕒 _Silakan gunakan nomornya dan tunggu OTP._`;
 
-            // UPDATE: Perbaikan struktur array tombol (ditambah koma & kurung siku)
             await ctx.reply(successMsg, {
                 parse_mode: 'Markdown',
                 ...Markup.inlineKeyboard([
@@ -493,12 +492,16 @@ bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
                 ])
             });
         } else {
-            const errorMsg = orderRes.data?.message || "Terjadi kesalahan pada Server.";
+            const errorMsg = orderRes.data?.message || "Stok habis atau server gangguan.";
             ctx.reply(`❌ Gagal Order: ${errorMsg}`);
         }
     } catch (e) {
-        console.error("ERROR EXEC ORDER V2:", e.message);
-        ctx.reply('❌ Sistem error saat memproses pesanan V2.');
+        // LOG ERROR KE CONSOLE UNTUK DEBUG
+        console.error("CRITICAL ERROR STEP 6:", e.message);
+        
+        // JANGAN panggil ctx.answerCbQuery().hide() di sini!
+        // Cukup kirim pesan teks biasa agar bot tidak crash
+        ctx.reply('❌ Terjadi kesalahan sistem. Silakan coba lagi nanti.');
     }
 });
 // --- 7. STEP: CEK STATUS OTP ---
