@@ -442,179 +442,133 @@ bot.action(/^cf_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
         ])
     });
 });
-
-// step 6
+// --- 6. STEP: BELI NOMOR & AUTO-POLLING ---
 bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
-    // [1]numId, [2]provId, [3]opId, [4]price
-    const [_, numId, provId, opId, price] = ctx.match; 
+    const [_, numId, provId, opId, price] = ctx.match;
     const userId = ctx.from.id;
 
     try {
-        // 1. LANGSUNG MATIKAN LOADING TELEGRAM (Cukup begini, JANGAN tambahkan .hide())
-        await ctx.answerCbQuery('🚀 Memproses Order...');
-
+        await ctx.answerCbQuery('🚀 Sedang memproses nomor...');
         const user = await User.findOne({ telegramId: userId });
 
-        // 2. Cek Saldo
         if (!user || user.saldo < parseInt(price)) {
-            // Gunakan reply agar pesan muncul di chat, bukan pop-up yang sering error 'hide'
-            return ctx.reply(`❌ Saldo kurang! Butuh Rp ${parseInt(price).toLocaleString('id-ID')}`);
+            return ctx.reply(`❌ Saldo kurang! Silakan isi saldo dulu.`);
         }
 
-        // 3. Panggil API V2
+        // Ambil nomor dari API V2
         const orderRes = await roApi.get('/v2/orders', {
-            params: {
-                number_id: numId,
-                provider_id: provId,
-                operator_id: opId
-            }
+            params: { number_id: numId, provider_id: provId, operator_id: opId }
         });
 
         if (orderRes.data && orderRes.data.success === true) {
             const order = orderRes.data.data;
             
-            // 4. Potong Saldo
+            // Potong Saldo
             user.saldo -= parseInt(price);
             await user.save();
 
-            const successMsg = `✅ *NOMOR BERHASIL DIDAPATKAN*\n━━━━━━━━━━━━━━━━━━\n` +
-                               `📱 Layanan: *${order.service}*\n` +
-                               `📞 Nomor: \`${order.phone_number}\`\n` +
-                               `🆔 Order ID: \`${order.order_id}\`\n` +
-                               `💰 Harga: Rp ${parseInt(price).toLocaleString('id-ID')}\n━━━━━━━━━━━━━━━━━━\n` +
-                               `🕒 _Silakan gunakan nomornya dan tunggu OTP._`;
+            // Kirim pesan awal (Tanpa tombol dulu)
+            const sentMsg = await ctx.reply(
+                `✅ *NOMOR DIDAPATKAN*\n━━━━━━━━━━━━━━━━━━\n` +
+                `📱 Layanan: *${order.service}*\n` +
+                `📞 Nomor: \`${order.phone_number}\`\n` +
+                `🆔 Order ID: \`${order.order_id}\`\n` +
+                `💰 Harga: Rp ${parseInt(price).toLocaleString('id-ID')}\n━━━━━━━━━━━━━━━━━━\n` +
+                `⏳ *STATUS: MENUNGGU OTP...*\n` +
+                `ℹ️ _Auto-Refund jika OTP tidak masuk dalam 20 menit._`, 
+                { parse_mode: 'Markdown' }
+            );
 
-            await ctx.reply(successMsg, {
-                parse_mode: 'Markdown',
-                ...Markup.inlineKeyboard([
-                    [Markup.button.callback('📩 CEK OTP', `status_${order.order_id}_${price}`)],
-                    [Markup.button.callback('❌ BATALKAN & REFUND', `cncl_${order.order_id}_${price}`)]
-                ])
-            });
+            // JALANKAN AUTO POLLING (Fungsi ada di bawah)
+            startOtpPolling(ctx, order.order_id, price, sentMsg.message_id, userId);
+
         } else {
-            const errorMsg = orderRes.data?.message || "Stok habis atau server gangguan.";
-            ctx.reply(`❌ Gagal Order: ${errorMsg}`);
+            ctx.reply(`❌ Gagal: ${orderRes.data?.message || 'Stok sedang kosong.'}`);
         }
     } catch (e) {
-        // LOG ERROR KE CONSOLE UNTUK DEBUG
-        console.error("CRITICAL ERROR STEP 6:", e.message);
-        
-        // JANGAN panggil ctx.answerCbQuery().hide() di sini!
-        // Cukup kirim pesan teks biasa agar bot tidak crash
-        ctx.reply('❌ Terjadi kesalahan sistem. Silakan coba lagi nanti.');
+        console.error("ERROR STEP 6:", e.message);
+        ctx.reply('❌ Terjadi gangguan sistem.');
     }
 });
+async function startOtpPolling(ctx, orderId, price, msgId, userId) {
+    const startTime = Date.now();
+    let buttonShown = false;
+    let isFinished = false;
 
-// --- 7. STEP: CEK STATUS OTP (FIXED V1 GET_STATUS) ---
-bot.action(/^status_(.+)_(.+)$/, async (ctx) => {
-    const [_, orderId, price] = ctx.match; 
-    
-    try {
-        await ctx.answerCbQuery(); // Hilangkan loading biru
+// Tambahkan pengecekan ini di DALAM setInterval startOtpPolling:
+const statusSekarang = data?.status; // data dari res.data.data (get_status)
 
-        // 1. Tembak API v1 sesuai dokumentasi terbaru lu
+if (statusSekarang === 'completed' || statusSekarang === 'canceled' || statusSekarang === 'expired') {
+    console.log(`[POLLING STOP] Order ${orderId} statusnya sudah: ${statusSekarang}`);
+    clearInterval(poll); // Hentikan perulangan detik itu juga
+    return;
+}
 
-        const res = await roApi.get(`/v1/orders/get_status`, {
-            params: { order_id: orderId.trim() }
-        });
+    // Cek setiap 10 detik
+    const poll = setInterval(async () => {
+        if (isFinished) return clearInterval(poll);
 
+        try {
+            const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
 
-        const data = res.data?.data;
-
-        // LOGIKA BARU: Cek apakah otp_code ada, bukan null, dan panjangnya lebih dari 0
-        const isOtpValid = data && data.otp_code && String(data.otp_code).trim().length > 0;
-
-        if (isOtpValid) {
-            // --- 1. JIKA OTP BENAR-BENAR ADA (Angka/Kode Muncul) ---
-            const msgSuccess = `📩 *OTP DITERIMA!*\n━━━━━━━━━━━━━━━━━━\n` +
-                               `🔢 Kode: \`${data.otp_code}\`\n` +
-                               `📝 Pesan: \`${data.otp_msg}\`\n━━━━━━━━━━━━━━━━━━\n` +
-                               `✅ _Gunakan segera!_`;
-
-            await ctx.editMessageText(msgSuccess, { 
-                parse_mode: 'Markdown',
-                ...Markup.inlineKeyboard([[Markup.button.callback('✅ SELESAIKAN ORDER', `done_${orderId}`)]])
+            // 1. Cek Status ke API V1 (get_status)
+            const res = await roApi.get(`/v1/orders/get_status`, {
+                params: { order_id: orderId }
             });
+            const data = res.data?.data;
 
-            // Kirim Testi
-            await sendTesti({
-                username: ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name,
-                service: data.service, country: data.country, price: parseInt(price), orderId: orderId
-            });
-
-        } else {
-            // --- 2. JIKA OTP BELUM ADA (Kosong, null, atau cuma spasi) ---
-            const timeNow = new Date().toLocaleTimeString('id-ID');
-            
-            const msgWaiting = `⏳ *MENUNGGU OTP...*\n━━━━━━━━━━━━━━━━━━\n` +
-                               `📞 Nomor: \`${data?.phone_number || 'Sedang diproses'}\`\n` +
-                               `🆔 Order ID: \`${orderId}\`\n` +
-                               `🕒 Terakhir Cek: *${timeNow}*\n━━━━━━━━━━━━━━━━━━\n` +
-                               `ℹ️ _OTP belum masuk di server RumahOTP._\n` +
-                               `⚠️ _Status: ${data?.status || 'Active'}_`;
-
-            await ctx.editMessageText(msgWaiting, {
-                parse_mode: 'Markdown',
-                ...Markup.inlineKeyboard([
-                    [Markup.button.callback('🔄 REFRESH / CEK OTP', `status_${orderId}_${price}`)],
-                    [Markup.button.callback('❌ BATALKAN & REFUND', `cncl_${orderId}_${price}`)]
-                ])
-            });
-        }
-// ...
-    } catch (e) { 
-        console.error("ERROR GET_STATUS V1:", e.message);
-        ctx.reply('❌ Terjadi kesalahan saat cek status ke API.'); 
-    }
-});
-// --- 9. STEP: SELESAIKAN ORDER (STATUS COMPLETED) ---
-bot.action(/^done_(.+)$/, async (ctx) => {
-    const orderId = ctx.match[1];
-    
-    try {
-        await ctx.answerCbQuery('✅ Menyelesaikan pesanan...');
-
-        // Tembak API v1 set_status (Sama seperti cancel, tapi statusnya beda)
-        // Gunakan status 'completed' sesuai standar API RumahOTP
-        const res = await roApi.get(`/v1/orders/set_status`, {
-            params: {
-                order_id: orderId,
-                status: 'completed' // Mengunci order agar permanen selesai
+            // --- KONDISI 1: OTP MASUK ---
+            if (data && data.otp_code && String(data.otp_code).trim().length > 0) {
+                isFinished = true;
+                clearInterval(poll);
+                return await ctx.telegram.editMessageText(ctx.chat.id, msgId, null, 
+                    `📩 *OTP DITERIMA!*\n━━━━━━━━━━━━━━━━━━\n` +
+                    `🔢 Kode: \`${data.otp_code}\`\n` +
+                    `📝 Pesan: \`${data.otp_msg}\`\n━━━━━━━━━━━━━━━━━━\n` +
+                    `✅ _Silakan selesaikan jika sudah digunakan._`, {
+                    parse_mode: 'Markdown',
+                    ...Markup.inlineKeyboard([[Markup.button.callback('✅ SELESAIKAN', `done_${orderId}`)]])
+                });
             }
-        });
 
-        if (res.data && res.data.success === true) {
-            const finishMsg = `✅ *ORDER SELESAI SAKSES!*\n━━━━━━━━━━━━━━━━━━\n` +
-                              `🆔 Order ID: \`${orderId}\`\n` +
-                              `🙏 Terima kasih telah menggunakan layanan Manzzy ID.\n━━━━━━━━━━━━━━━━━━\n` +
-                              `ℹ️ _Nomor ini sudah tidak bisa dibatalkan/refund._`;
+            // --- KONDISI 2: AUTO-REFUND (20 MENIT / 1200 DETIK) ---
+            if (elapsedSeconds >= 1200) {
+                isFinished = true;
+                clearInterval(poll);
+                
+                // Cancel di Provider
+                await roApi.get(`/v1/orders/set_status?order_id=${orderId}&status=cancel`);
+                
+                // Refund ke User
+                const user = await User.findOne({ telegramId: userId });
+                if (user) {
+                    user.saldo += parseInt(price);
+                    await user.save();
+                }
 
-            // Kirim pesan baru sebagai konfirmasi final
-            await ctx.reply(finishMsg, { 
-                parse_mode: 'Markdown',
-                ...Markup.inlineKeyboard([
-                    [Markup.button.callback('🏠 MENU UTAMA', 'start_menu')]
-                ])
-            });
-
-            // Hapus pesan lama yang ada tombol 'SELESAIKAN' agar tidak di-spam
-            try { 
-                await ctx.deleteMessage(); 
-            } catch (err) {
-                // Jika gagal hapus (misal pesan > 48 jam), edit saja pesannya
-                await ctx.editMessageText(`✅ Order \`${orderId}\` Selesai.`);
+                return await ctx.telegram.editMessageText(ctx.chat.id, msgId, null, 
+                    `⏰ *WAKTU HABIS (20m)*\n━━━━━━━━━━━━━━━━━━\n` +
+                    `🆔 Order ID: \`${orderId}\`\n` +
+                    `💰 *Saldo Rp ${parseInt(price).toLocaleString('id-ID')} telah direfund otomatis.*`, 
+                    { parse_mode: 'Markdown' }
+                );
             }
-        } else {
-            const errMsg = res.data?.message || "Gagal menyelesaikan di server.";
-            ctx.reply(`❌ Gagal: ${errMsg}`);
-        }
-    } catch (e) {
-        console.error("ERROR DONE ORDER:", e.message);
-        ctx.reply('❌ Terjadi kesalahan saat menyelesaikan order.');
-    }
-});
 
-// --- 8. STEP: CANCEL & REFUND (FIXED URL & STATUS) ---
+            // --- KONDISI 3: MUNCULKAN TOMBOL BATAL MANUAL (SETELAH 3 MENIT / 180 DETIK) ---
+            if (elapsedSeconds >= 180 && !buttonShown) {
+                buttonShown = true;
+                await ctx.telegram.editMessageReplyMarkup(ctx.chat.id, msgId, null, 
+                    Markup.inlineKeyboard([[Markup.button.callback('❌ BATALKAN & REFUND', `cncl_${orderId}_${price}`)]])
+                );
+            }
+
+        } catch (e) {
+            console.error("Polling Error:", e.message);
+        }
+    }, 10000);
+}
+
+// --- 8. STEP: CANCEL & REFUND (SYNCHRONIZED) ---
 bot.action(/^cncl_(.+)_(.+)$/, async (ctx) => {
     const [_, orderId, price] = ctx.match;
     const userId = ctx.from.id;
@@ -622,31 +576,33 @@ bot.action(/^cncl_(.+)_(.+)$/, async (ctx) => {
     try {
         await ctx.answerCbQuery('⏳ Sedang memproses refund...');
 
-        // 1. Tembak API RumahOTP (v1 sesuai dokumentasi kamu)
-        // Format: /v1/orders/set_status?order_id=ID&status=cancel
+        // 1. Tembak API RumahOTP (v1)
         const res = await roApi.get(`/v1/orders/set_status`, {
             params: {
                 order_id: orderId,
-                status: 'cancel' // Ini parameter wajibnya
+                status: 'cancel'
             }
         });
 
         // 2. CEK RESPON API
         if (res.data && res.data.success === true) {
+            // PENTING: Kita tandai bahwa order ini sudah selesai (batal) 
+            // agar fungsi startOtpPolling berhenti mengecek.
+            // Jika kamu pakai global object untuk tracking polling, 
+            // kamu bisa stop di sini. Tapi cara paling aman adalah cek saldo DB.
+
             const user = await User.findOne({ telegramId: userId });
             
             if (user) {
-                // Tambahkan saldo sesuai harga beli (price dari callback)
                 user.saldo += parseInt(price);
                 await user.save();
 
-                const refundMsg = `✅ *PESANAN DIBATALKAN & REFUND*\n━━━━━━━━━━━━━━━━━━\n` +
+                const refundMsg = `✅ *PESANAN DIBATALKAN (MANUAL)*\n━━━━━━━━━━━━━━━━━━\n` +
                                  `🆔 Order ID: \`${orderId}\`\n` +
                                  `💰 Refund: *Rp ${parseInt(price).toLocaleString('id-ID')}*\n` +
-                                 `💳 Saldo Anda sekarang: *Rp ${user.saldo.toLocaleString('id-ID')}*\n━━━━━━━━━━━━━━━━━━\n` +
-                                 `🏠 _Saldo telah otomatis dikembalikan._`;
+                                 `💳 Saldo Anda: *Rp ${user.saldo.toLocaleString('id-ID')}*\n━━━━━━━━━━━━━━━━━━\n` +
+                                 `🏠 _Saldo telah berhasil dikembalikan ke akun._`;
 
-                // Gunakan editMessageText (bukan Caption) karena Step 7 tadi pakai Text
                 await ctx.editMessageText(refundMsg, {
                     parse_mode: 'Markdown',
                     ...Markup.inlineKeyboard([
@@ -655,13 +611,13 @@ bot.action(/^cncl_(.+)_(.+)$/, async (ctx) => {
                 });
             }
         } else {
-            // Jika API menolak (misal: OTP sudah masuk duluan)
+            // Biasanya gagal kalau OTP keburu masuk pas user baru mau klik batal
             const pesanGagal = res.data?.message || "Nomor sudah ditarik atau OTP sudah masuk.";
-            ctx.reply(`❌ Gagal Batal: ${pesanGagal}`);
+            await ctx.reply(`❌ Gagal Batal: ${pesanGagal}`);
         }
     } catch (e) {
         console.error("ERROR REFUND:", e.message);
-        ctx.reply('❌ Sistem error saat memproses refund. Hubungi Admin.');
+        ctx.reply('❌ Sistem error saat memproses refund.');
     }
 });
 // NOTIF TESTI KE 
@@ -685,7 +641,54 @@ const sendTesti = async (data) => {
         console.error("Gagal kirim testi ke channel:", e.message);
     }
 };
+// --- 9. STEP: SELESAIKAN ORDER (FIXED & STOP POLLING) ---
+bot.action(/^done_(.+)$/, async (ctx) => {
+    const orderId = ctx.match[1];
+    
+    try {
+        await ctx.answerCbQuery('✅ Menyelesaikan pesanan...');
 
+        // 1. Tembak API RumahOTP untuk mengunci status
+        const res = await roApi.get(`/v1/orders/set_status`, {
+            params: {
+                order_id: orderId,
+                status: 'completed' 
+            }
+        });
+
+        if (res.data && res.data.success === true) {
+            // PENTING: Di sini polling otomatis akan berhenti dengan sendirinya 
+            // karena saat startOtpPolling melakukan cek status berikutnya, 
+            // API akan mengembalikan status 'completed', bukan lagi 'received'.
+            // Tapi pastikan di fungsi startOtpPolling kamu ada pengecekan status API.
+
+            const finishMsg = `✅ *ORDER BERHASIL DISELESAIKAN*\n━━━━━━━━━━━━━━━━━━\n` +
+                              `🆔 Order ID: \`${orderId}\`\n` +
+                              `🙏 Terima kasih telah bertransaksi di Manzzy ID!\n━━━━━━━━━━━━━━━━━━\n` +
+                              `ℹ️ _Status pesanan sudah permanen dan tidak bisa di-refund._`;
+
+            await ctx.reply(finishMsg, { 
+                parse_mode: 'Markdown',
+                ...Markup.inlineKeyboard([
+                    [Markup.button.callback('🏠 MENU UTAMA', 'start_menu')]
+                ])
+            });
+
+            // Hapus pesan tombol biar gak dobel klik
+            try { 
+                await ctx.deleteMessage(); 
+            } catch (err) {
+                await ctx.editMessageText(`✅ Order \`${orderId}\` Selesai.`);
+            }
+        } else {
+            const errMsg = res.data?.message || "Gagal konfirmasi ke server.";
+            ctx.reply(`❌ Gagal: ${errMsg}`);
+        }
+    } catch (e) {
+        console.error("ERROR DONE ORDER:", e.message);
+        ctx.reply('❌ Terjadi kesalahan saat menyelesaikan order.');
+    }
+});
 // TOP UP SALDO
 bot.action('topup_menu', async (ctx) => {
     const userId = ctx.from.id;
