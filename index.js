@@ -490,7 +490,7 @@ bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
         ctx.reply('❌ Terjadi gangguan sistem.');
     }
 });
-// --- FUNGSI AUTO POLLING + AUTO REFUND (FIXED & SAFE) ---
+// --- FUNGSI AUTO POLLING + AUTO REFUND (ANTI-ERROR) ---
 async function startOtpPolling(ctx, orderId, price, msgId, userId) {
     const startTime = Date.now();
     let buttonShown = false;
@@ -498,7 +498,7 @@ async function startOtpPolling(ctx, orderId, price, msgId, userId) {
 
     // Perulangan setiap 10 detik
     const poll = setInterval(async () => {
-        // Jika status sudah final, hentikan perulangan
+        // Jika status sudah final, stop perulangan detik itu juga
         if (isFinished) {
             clearInterval(poll);
             return;
@@ -507,17 +507,18 @@ async function startOtpPolling(ctx, orderId, price, msgId, userId) {
         try {
             const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
 
-            // 1. Cek Status ke API V1 (get_status)
+            // 1. Ambil Status dari API V1 (get_status)
             const res = await roApi.get(`/v1/orders/get_status`, {
                 params: { order_id: orderId.trim() }
             });
             
+            // Variabel 'data' didefinisikan DI SINI (aman)
             const data = res.data?.data;
 
-            // Jika data API kosong/null, jangan lanjut ke bawah dulu
+            // Jika data API kosong/gangguan, jangan lanjut ke bawah dulu
             if (!data) return;
 
-            // 2. CEK STATUS (Stop polling jika sudah selesai/batal di luar fungsi ini)
+            // 2. CEK STATUS (Jika sudah selesai/batal di luar fungsi ini, stop polling)
             const statusSekarang = data.status; 
             if (statusSekarang === 'completed' || statusSekarang === 'canceled' || statusSekarang === 'expired') {
                 console.log(`[POLLING STOP] Order ${orderId} statusnya sudah: ${statusSekarang}`);
@@ -556,8 +557,10 @@ async function startOtpPolling(ctx, orderId, price, msgId, userId) {
                 isFinished = true;
                 clearInterval(poll);
                 
+                // Tembak API Cancel
                 await roApi.get(`/v1/orders/set_status?order_id=${orderId}&status=cancel`);
                 
+                // Refund Saldo
                 const user = await User.findOne({ telegramId: userId });
                 if (user) {
                     user.saldo += parseInt(price);
@@ -572,7 +575,7 @@ async function startOtpPolling(ctx, orderId, price, msgId, userId) {
                 );
             }
 
-            // 5. KONDISI: TOMBOL BATAL MANUAL (3 MENIT)
+            // 5. KONDISI: TOMBOL BATAL MANUAL (MUNCUL SETELAH 3 MENIT)
             if (elapsedSeconds >= 180 && !buttonShown) {
                 buttonShown = true;
                 await ctx.telegram.editMessageReplyMarkup(ctx.chat.id, msgId, null, 
@@ -581,9 +584,10 @@ async function startOtpPolling(ctx, orderId, price, msgId, userId) {
             }
 
         } catch (e) {
-            console.error("Polling Error:", e.message);
+            console.error("Polling Internal Error:", e.message);
+            // Tetap lanjut polling meski ada error koneksi sesaat
         }
-    }, 10000);
+    }, 10000); // 10 Detik
 }
 // --- 8. STEP: CANCEL & REFUND (SYNCHRONIZED) ---
 bot.action(/^cncl_(.+)_(.+)$/, async (ctx) => {
