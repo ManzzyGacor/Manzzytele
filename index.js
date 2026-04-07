@@ -490,38 +490,48 @@ bot.action(/^buy_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
         ctx.reply('❌ Terjadi gangguan sistem.');
     }
 });
+// --- FUNGSI AUTO POLLING + AUTO REFUND (FIXED & SAFE) ---
 async function startOtpPolling(ctx, orderId, price, msgId, userId) {
     const startTime = Date.now();
     let buttonShown = false;
     let isFinished = false;
 
-// Tambahkan pengecekan ini di DALAM setInterval startOtpPolling:
-const statusSekarang = data?.status; // data dari res.data.data (get_status)
-
-if (statusSekarang === 'completed' || statusSekarang === 'canceled' || statusSekarang === 'expired') {
-    console.log(`[POLLING STOP] Order ${orderId} statusnya sudah: ${statusSekarang}`);
-    clearInterval(poll); // Hentikan perulangan detik itu juga
-    return;
-}
-
-    // Cek setiap 10 detik
+    // Perulangan setiap 10 detik
     const poll = setInterval(async () => {
-        if (isFinished) return clearInterval(poll);
+        // Jika status sudah final, hentikan perulangan
+        if (isFinished) {
+            clearInterval(poll);
+            return;
+        }
 
         try {
             const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
 
             // 1. Cek Status ke API V1 (get_status)
             const res = await roApi.get(`/v1/orders/get_status`, {
-                params: { order_id: orderId }
+                params: { order_id: orderId.trim() }
             });
+            
             const data = res.data?.data;
 
-            // --- KONDISI 1: OTP MASUK ---
-            if (data && data.otp_code && String(data.otp_code).trim().length > 0) {
+            // Jika data API kosong/null, jangan lanjut ke bawah dulu
+            if (!data) return;
+
+            // 2. CEK STATUS (Stop polling jika sudah selesai/batal di luar fungsi ini)
+            const statusSekarang = data.status; 
+            if (statusSekarang === 'completed' || statusSekarang === 'canceled' || statusSekarang === 'expired') {
+                console.log(`[POLLING STOP] Order ${orderId} statusnya sudah: ${statusSekarang}`);
                 isFinished = true;
                 clearInterval(poll);
-                return await ctx.telegram.editMessageText(ctx.chat.id, msgId, null, 
+                return;
+            }
+
+            // 3. KONDISI: OTP MASUK
+            if (data.otp_code && String(data.otp_code).trim().length > 0) {
+                isFinished = true;
+                clearInterval(poll);
+                
+                await ctx.telegram.editMessageText(ctx.chat.id, msgId, null, 
                     `📩 *OTP DITERIMA!*\n━━━━━━━━━━━━━━━━━━\n` +
                     `🔢 Kode: \`${data.otp_code}\`\n` +
                     `📝 Pesan: \`${data.otp_msg}\`\n━━━━━━━━━━━━━━━━━━\n` +
@@ -529,17 +539,25 @@ if (statusSekarang === 'completed' || statusSekarang === 'canceled' || statusSek
                     parse_mode: 'Markdown',
                     ...Markup.inlineKeyboard([[Markup.button.callback('✅ SELESAIKAN', `done_${orderId}`)]])
                 });
+
+                // Kirim Testi Otomatis
+                await sendTesti({
+                    username: ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name,
+                    service: data.service || 'WhatsApp',
+                    country: data.country || 'Indonesia',
+                    price: price,
+                    orderId: orderId
+                });
+                return;
             }
 
-            // --- KONDISI 2: AUTO-REFUND (20 MENIT / 1200 DETIK) ---
+            // 4. KONDISI: AUTO-REFUND (20 MENIT / 1200 DETIK)
             if (elapsedSeconds >= 1200) {
                 isFinished = true;
                 clearInterval(poll);
                 
-                // Cancel di Provider
                 await roApi.get(`/v1/orders/set_status?order_id=${orderId}&status=cancel`);
                 
-                // Refund ke User
                 const user = await User.findOne({ telegramId: userId });
                 if (user) {
                     user.saldo += parseInt(price);
@@ -549,12 +567,12 @@ if (statusSekarang === 'completed' || statusSekarang === 'canceled' || statusSek
                 return await ctx.telegram.editMessageText(ctx.chat.id, msgId, null, 
                     `⏰ *WAKTU HABIS (20m)*\n━━━━━━━━━━━━━━━━━━\n` +
                     `🆔 Order ID: \`${orderId}\`\n` +
-                    `💰 *Saldo Rp ${parseInt(price).toLocaleString('id-ID')} telah direfund otomatis.*`, 
+                    `💰 *Saldo Rp ${parseInt(price).toLocaleString('id-ID')} direfund otomatis.*`, 
                     { parse_mode: 'Markdown' }
                 );
             }
 
-            // --- KONDISI 3: MUNCULKAN TOMBOL BATAL MANUAL (SETELAH 3 MENIT / 180 DETIK) ---
+            // 5. KONDISI: TOMBOL BATAL MANUAL (3 MENIT)
             if (elapsedSeconds >= 180 && !buttonShown) {
                 buttonShown = true;
                 await ctx.telegram.editMessageReplyMarkup(ctx.chat.id, msgId, null, 
@@ -567,7 +585,6 @@ if (statusSekarang === 'completed' || statusSekarang === 'canceled' || statusSek
         }
     }, 10000);
 }
-
 // --- 8. STEP: CANCEL & REFUND (SYNCHRONIZED) ---
 bot.action(/^cncl_(.+)_(.+)$/, async (ctx) => {
     const [_, orderId, price] = ctx.match;
