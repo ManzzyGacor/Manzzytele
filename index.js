@@ -527,12 +527,15 @@ async function startOtpPolling(ctx, orderId, price, msgId, userId) {
                 return;
             }
 
-            // 3. KONDISI: OTP MASUK
-            if (data.otp_code && String(data.otp_code).trim().length > 0) {
+// --- KONDISI 1: OTP MASUK (LOGIKA DIPERKETAT) ---
+            // Kita cek: apakah data ada? apakah otp_code ada? apakah setelah di-trim panjangnya lebih dari 0?
+            const isOtpValid = data && data.otp_code && String(data.otp_code).trim().length > 0;
+
+            if (isOtpValid) {
                 isFinished = true;
                 clearInterval(poll);
                 
-                await ctx.telegram.editMessageText(ctx.chat.id, msgId, null, 
+                return await ctx.telegram.editMessageText(ctx.chat.id, msgId, null, 
                     `📩 *OTP DITERIMA!*\n━━━━━━━━━━━━━━━━━━\n` +
                     `🔢 Kode: \`${data.otp_code}\`\n` +
                     `📝 Pesan: \`${data.otp_msg}\`\n━━━━━━━━━━━━━━━━━━\n` +
@@ -551,6 +554,7 @@ async function startOtpPolling(ctx, orderId, price, msgId, userId) {
                 });
                 return;
             }
+
 
             // 4. KONDISI: AUTO-REFUND (20 MENIT / 1200 DETIK)
             if (elapsedSeconds >= 1200) {
