@@ -709,7 +709,7 @@ if (data === "choose_service") {
     const perPage = 20;
 
     // 💬 LANGSUNG UBAH CAPTION MENJADI LOADING
-    await bot.editMessageCaption("⏳ 𝗠𝗲𝗺𝘂𝗮𝘁 𝗗𝗮𝗳𝘁𝗮𝗿 𝗟𝗮𝘆𝗮𝗻𝗮𝗻...... 
+    await bot.editMessageCaption("⏳ 𝗠𝗲𝗺𝘂𝗮𝘁 𝗗𝗮𝗳𝘁𝗮𝗿 𝗟𝗮𝘆𝗮𝗻𝗮𝗻......" 
     ,{
         chat_id: chatId,
         message_id: message.message_id,
