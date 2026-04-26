@@ -18,7 +18,7 @@ const fs = require("fs");
 const chalk = require("chalk");
 
 module.exports = {
-TOKEN: "8690666851:AAFNi_SEZGvk2GxIBPVLcj4HmzboXP6r0MA", // Token dari @BotFather
+TOKEN: "8598615314:AAGOw6yMBICnxlgdreZkLmy-IBUHZfPD8Dg", // Token dari @BotFather
 OWNER_ID: "7533630775", // ID Telegram owner
 urladmin: "https://t.me/Manjikeduwa",
 urlchannel: "https://t.me/manzzyidnokos",
