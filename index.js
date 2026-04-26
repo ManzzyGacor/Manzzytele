@@ -717,7 +717,7 @@ if (data === "choose_service") {
     }).catch(() => {});
 
     try {
-        const response = await axios.get("https://www.rumahotp.com/api/v2/services", {
+        const response = await axios.get("https://www.rumahotp.io/api/v2/services", {
             headers: { "x-apikey": API_KEY }
         });
 
@@ -895,7 +895,7 @@ if (data.startsWith("service_") || data.startsWith("countrylist_")) {
         if (!global.cachedCountries) global.cachedCountries = {};
         if (!global.cachedCountries[serviceId]) {
             const res = await axios.get(
-                `https://www.rumahotp.com/api/v2/countries?service_id=${serviceId}`,
+                `https://www.rumahotp.io/api/v2/countries?service_id=${serviceId}`,
                 { headers: { "x-apikey": apiKey, Accept: "application/json" } }
             );
 
@@ -1051,7 +1051,7 @@ if (data.startsWith("country_")) {
         // Kalau tidak ada di cache, ambil dari API
         if (!negara) {
             const res = await axios.get(
-                `https://www.rumahotp.com/api/v2/countries?service_id=${serviceId}`,
+                `https://www.rumahotp.io/api/v2/countries?service_id=${serviceId}`,
                 { headers: { "x-apikey": apiKey } }
             );
             negara = (res.data?.data || []).find(
@@ -1189,7 +1189,7 @@ if (data.startsWith("buy_")) {
 
         if (!negara) {
             const res = await axios.get(
-                `https://www.rumahotp.com/api/v2/countries?service_id=${serviceId}`,
+                `https://www.rumahotp.io/api/v2/countries?service_id=${serviceId}`,
                 { headers: { "x-apikey": apiKey } }
             );
             negara = (res.data?.data || [])
@@ -1332,7 +1332,7 @@ if (data.startsWith("operator_")) {
         // AMBIL OPERATOR DARI API
         // =====================================================
         const response = await axios.get(
-            `https://www.rumahotp.com/api/v2/operators?country=${encodeURIComponent(negaraName)}&provider_id=${providerId}`,
+            `https://www.rumahotp.io/api/v2/operators?country=${encodeURIComponent(negaraName)}&provider_id=${providerId}`,
             { headers: { "x-apikey": apiKey } }
         );
 
@@ -1445,7 +1445,7 @@ if (data.startsWith("chooseop_")) {
 
         if (!negara) {
             const resNeg = await axios.get(
-                `https://www.rumahotp.com/api/v2/countries?service_id=${serviceId}`,
+                `https://www.rumahotp.io/api/v2/countries?service_id=${serviceId}`,
                 { headers: { "x-apikey": apiKey } }
             );
             negara = (resNeg.data?.data || [])
@@ -1483,7 +1483,7 @@ if (data.startsWith("chooseop_")) {
 
         // 🔹 Ambil detail operator
         const ops = await axios.get(
-            `https://www.rumahotp.com/api/v2/operators?country=${encodeURIComponent(negara.name)}&provider_id=${providerId}`,
+            `https://www.rumahotp.io/api/v2/operators?country=${encodeURIComponent(negara.name)}&provider_id=${providerId}`,
             { headers: { "x-apikey": apiKey } }
         );
 
@@ -1637,7 +1637,7 @@ try {
       // 🔹 Jika belum ada di cache, fallback ke API (backup)
       if (!providerData) {
         const resNeg = await axios.get(
-          `https://www.rumahotp.com/api/v2/countries?service_id=${serviceId}`,
+          `https://www.rumahotp.io/api/v2/countries?service_id=${serviceId}`,
           { headers: { "x-apikey": apiKey, Accept: "application/json" } }
         );
         const negara = (resNeg.data?.data || []).find(
@@ -1695,7 +1695,7 @@ await bot.editMessageCaption(
     // 🛒 Buat pesanan
     // ===================================================
     const resOrder = await axios.get(
-      `https://www.rumahotp.com/api/v2/orders?number_id=${numberId}&provider_id=${providerId}&operator_id=${operatorId}`,
+      `https://www.rumahotp.io/api/v2/orders?number_id=${numberId}&provider_id=${providerId}&operator_id=${operatorId}`,
       { headers: { "x-apikey": apiKey, Accept: "application/json" } }
     );
 
@@ -1773,7 +1773,7 @@ setTimeout(async () => {
 
   try {
     const resCheck = await axios.get(
-      `https://www.rumahotp.com/api/v1/orders/get_status?order_id=${dataOrder.order_id}`,
+      `https://www.rumahotp.io/api/v1/orders/get_status?order_id=${dataOrder.order_id}`,
       { headers: { "x-apikey": apiKey } }
     );
 
@@ -1782,7 +1782,7 @@ setTimeout(async () => {
 
     // Belum dapat OTP -> cancel dan refund
     await axios.get(
-      `https://www.rumahotp.com/api/v1/orders/set_status?order_id=${dataOrder.order_id}&status=cancel`,
+      `https://www.rumahotp.io/api/v1/orders/set_status?order_id=${dataOrder.order_id}&status=cancel`,
       { headers: { "x-apikey": apiKey } }
     );
 
@@ -1888,7 +1888,7 @@ if (data.startsWith("checksms_")) {
   const loadingMsg = await bot.sendMessage(chatId, "📡 Mengecek status SMS OTP...", { parse_mode: "HTML" });
 
   try {
-    const res = await axios.get(`https://www.rumahotp.com/api/v1/orders/get_status?order_id=${orderId}`, {
+    const res = await axios.get(`https://www.rumahotp.io/api/v1/orders/get_status?order_id=${orderId}`, {
       headers: { "x-apikey": apiKey, Accept: "application/json" }
     });
 
@@ -2129,7 +2129,7 @@ if (data.startsWith("cancelorder_")) {
   try {
     // 🔹 Batalkan pesanan di server RumahOTP
     const response = await axios.get(
-      `https://www.rumahotp.com/api/v1/orders/set_status?order_id=${orderId}&status=cancel`,
+      `https://www.rumahotp.io/api/v1/orders/set_status?order_id=${orderId}&status=cancel`,
       { headers: { "x-apikey": apiKey, Accept: "application/json" } }
     );
 
@@ -2196,7 +2196,7 @@ if (data === "profile") {
   // 🔰 Jika OWNER utama → ambil saldo dari API RumahOTP
   if (String(userId) === String(config.OWNER_ID)) {
     try {
-      const response = await axios.get("https://www.rumahotp.com/api/v1/user/balance", {
+      const response = await axios.get("https://www.rumahotp.io/api/v1/user/balance", {
         headers: {
           "x-apikey": apiKey,
           Accept: "application/json",
@@ -3021,9 +3021,9 @@ if (await guardAll(message)) return;
     if (!API_KEY)
       return bot.sendMessage(chatId, `⚠️ *API Key RumahOTP belum diset di config.js!*`, { parse_mode: "HTML" });
 
-    const BASE_URL = "https://www.rumahotp.com/api/v2/deposit/create";
-    const STATUS_URL = "https://www.rumahotp.com/api/v2/deposit/get_status";
-    const CANCEL_URL = "https://www.rumahotp.com/api/v1/deposit/cancel";
+    const BASE_URL = "https://www.rumahotp.io/api/v2/deposit/create";
+    const STATUS_URL = "https://www.rumahotp.io/api/v2/deposit/get_status";
+    const CANCEL_URL = "https://www.rumahotp.io/api/v1/deposit/cancel";
     const PAYMENT_ID = "qris";
     const pendingPath = "./database/depositPending.json";
     const saldoPath = "./database/saldoOtp.json";
@@ -3306,7 +3306,7 @@ bot.on("callback_query", async (cb) => {
     }
 
     const API_KEY = config.RUMAHOTP;
-    const CANCEL_URL = "https://www.rumahotp.com/api/v1/deposit/cancel";
+    const CANCEL_URL = "https://www.rumahotp.io/api/v1/deposit/cancel";
     const pendingPath = "./database/depositPending.json";
     const depositPath = "./database/deposit.json";
 
@@ -3414,7 +3414,7 @@ Contoh:
     );
 
 try {
-    const res = await axios.get("https://www.rumahotp.com/api/v1/h2h/product", {
+    const res = await axios.get("https://www.rumahotp.io/api/v1/h2h/product", {
         headers: { "x-apikey": config.RUMAHOTP }
     });
 
@@ -3578,7 +3578,7 @@ Silakan coba lagi.`,
 
     try {
         // 🔥 Buat transaksi
-        const url = `https://www.rumahotp.com/api/v1/h2h/transaksi/create?id=${code}&target=${target}`;
+        const url = `https://www.rumahotp.io/api/v1/h2h/transaksi/create?id=${code}&target=${target}`;
         const res = await axios.get(url, {
             headers: {
                 "x-apikey": config.RUMAHOTP,
@@ -3626,7 +3626,7 @@ Silakan coba lagi.`,
 
         const interval = setInterval(async () => {
             try {
-                const statusURL = `https://www.rumahotp.com/api/v1/h2h/transaksi/status?transaksi_id=${orderId}`;
+                const statusURL = `https://www.rumahotp.io/api/v1/h2h/transaksi/status?transaksi_id=${orderId}`;
 
                 const s = await axios.get(statusURL, {
                     headers: {
@@ -3825,7 +3825,7 @@ Untuk input berdasarkan nominal:
                 );
             }
 
-            const productRes = await axios.get("https://www.rumahotp.com/api/v1/h2h/product", {
+            const productRes = await axios.get("https://www.rumahotp.io/api/v1/h2h/product", {
                 headers: { "x-apikey": config.RUMAHOTP }
             });
 
@@ -3863,7 +3863,7 @@ Untuk input berdasarkan nominal:
         // ==============================================
         // 🔥 CREATE TRANSAKSI
         // ==============================================
-        const url = `https://www.rumahotp.com/api/v1/h2h/transaksi/create?id=${finalCode}&target=${finalTarget}`;
+        const url = `https://www.rumahotp.io/api/v1/h2h/transaksi/create?id=${finalCode}&target=${finalTarget}`;
         const res = await axios.get(url, {
             headers: {
                 "x-apikey": config.RUMAHOTP,
@@ -3909,7 +3909,7 @@ Untuk input berdasarkan nominal:
         const interval = setInterval(async () => {
             try {
                 const s = await axios.get(
-                    `https://www.rumahotp.com/api/v1/h2h/transaksi/status?transaksi_id=${orderId}`,
+                    `https://www.rumahotp.io/api/v1/h2h/transaksi/status?transaksi_id=${orderId}`,
                     {
                         headers: {
                             "x-apikey": config.RUMAHOTP,
